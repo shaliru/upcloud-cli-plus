@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(make:*)",
+      "Bash(export:*)",
+      "Bash(go mod:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

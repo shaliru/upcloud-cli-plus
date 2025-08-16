@@ -1,0 +1,46 @@
+name: CodeQL
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/*.yml'
+      - '**.go'
+      - 'go.mod'
+      - '**.py'
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+jobs:
+  analysis:
+    name: Analysis
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - actions
+          - go
+          - python
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+        if: matrix.language == 'go'
+      - uses: github/codeql-action/init@df559355d593797519d70b90fc8edd5db049e7a2 # v3.29.9
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.language == 'go' && 'manual' || 'none' }}
+      - run: make build install-docs-tools md-docs
+        if: matrix.language == 'go'
+      - uses: github/codeql-action/analyze@df559355d593797519d70b90fc8edd5db049e7a2 # v3.29.9
+        with:
+          category: /language:${{ matrix.language }}
