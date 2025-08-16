@@ -13,6 +13,7 @@ import (
 	"github.com/UpCloudLtd/upcloud-cli/v3/internal/ui"
 	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud"
 	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/request"
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
@@ -305,7 +306,7 @@ func (ls *listCommand) handleInteractiveMode(servers *upcloud.Servers, exec comm
 		ipResults[result.index] = result.publicIP
 	}
 
-	// Create server items with IP addresses
+	// Create server items with IP addresses and pre-rendered details
 	for i, server := range servers.Servers {
 		plan := server.Plan
 		if plan == customPlan {
@@ -329,31 +330,12 @@ func (ls *listCommand) handleInteractiveMode(servers *upcloud.Servers, exec comm
 		}
 	}
 
-	// Add exit option at the end of the list
-	serverItems = append(serverItems, ServerItem{
-		UUID:     "exit",
-		Hostname: "Exit interactive mode",
-		Plan:     "",
-		Zone:     "",
-		State:    "",
-		PublicIP: "",
-		Server:   upcloud.Server{},
-	})
-
-	// Server selection prompt
+	// Setup promptui templates for server selection
 	templates := &promptui.SelectTemplates{
 		Label:    "{{ . | cyan }}",
-		Active:   "{{ printf \"%-25s %-12s %-15s %-16s %s\" .Hostname .State .Zone .PublicIP .Plan | cyan | bold }}",
-		Inactive: "  {{ printf \"%-25s %-12s %-15s %-16s %s\" .Hostname .State .Zone .PublicIP .Plan | faint }}",
+		Active:   "> {{ printf \"%-38s %-25s %-23s %-9s %-9s %-16s\" .UUID .Hostname .Plan .Zone .State .PublicIP | cyan | bold }}",
+		Inactive: "  {{ printf \"%-38s %-25s %-23s %-9s %-9s %-16s\" .UUID .Hostname .Plan .Zone .State .PublicIP | faint }}",
 		Selected: "{{ .Hostname | cyan }}",
-		Details: `
---------- Server Details ----------
-{{ "Hostname:" | faint }}	{{ .Hostname }}
-{{ "UUID:" | faint }}	{{ .UUID }}
-{{ "Plan:" | faint }}	{{ .Plan }}
-{{ "Zone:" | faint }}	{{ .Zone }}
-{{ "State:" | faint }}	{{ .State }}
-{{ "Public IP:" | faint }}	{{ .PublicIP }}`,
 	}
 
 	searcher := func(input string, index int) bool {
@@ -363,10 +345,17 @@ func (ls *listCommand) handleInteractiveMode(servers *upcloud.Servers, exec comm
 		return strings.Contains(name, input)
 	}
 
-	// Print instructions and column headers before the prompt
-	fmt.Printf("\nUse the arrow keys to navigate: ↓ ↑ → ← and / toggles search, or select 'Exit interactive mode' to quit\n\n")
-	fmt.Printf("    %-25s %-12s %-15s %-16s %s\n", "HOSTNAME", "STATE", "ZONE", "PUBLIC IP", "PLAN")
-	fmt.Printf("    %s\n", strings.Repeat("─", 85))
+	// Clean, simplified header for server selection
+	fmt.Printf("\nServer Selection:\n\n")
+	fmt.Printf("Use the arrow keys to navigate: ↓ ↑ → ←, / toggles search, Enter to select, or Ctrl+C to quit\n\n")
+	fmt.Printf("    %-38s %-25s %-23s %-9s %-9s %s\n", "UUID", "Hostname", "Plan", "Zone", "State", "Public IPv4")
+	fmt.Printf("    %s %s %s %s %s %s\n",
+		strings.Repeat("─", 38),
+		strings.Repeat("─", 25),
+		strings.Repeat("─", 23),
+		strings.Repeat("─", 9),
+		strings.Repeat("─", 9),
+		strings.Repeat("─", 16))
 
 	prompt := promptui.Select{
 		Label:     "",
@@ -378,18 +367,14 @@ func (ls *listCommand) handleInteractiveMode(servers *upcloud.Servers, exec comm
 	}
 
 	index, _, err := prompt.Run()
+
 	if err != nil {
-		return nil, fmt.Errorf("server selection cancelled: %w", err)
-	}
-
-	selectedServer := serverItems[index]
-
-	// Handle exit option
-	if selectedServer.UUID == "exit" {
-		// Exit cleanly with a simple separation
+		// User cancelled selection - exit cleanly
 		fmt.Println() // Add a newline for clean separation
 		return output.OnlyMarshaled{Value: ""}, nil
 	}
+
+	selectedServer := serverItems[index]
 
 	// Show action menu for selected server
 	return ls.showActionMenu(selectedServer, exec)
@@ -408,12 +393,29 @@ type ServerItem struct {
 
 // showActionMenu displays available actions for the selected server
 func (ls *listCommand) showActionMenu(server ServerItem, exec commands.Executor) (output.Output, error) {
+	// Clear the previous interface and show selected server summary in a beautiful table
+	fmt.Print("\033[2J\033[H") // Clear screen and move cursor to top
+
+	// Create a beautiful server summary table
+	summaryTable := createBoxedTable()
+	summaryTable.SetTitle("Selected Server")
+	summaryTable.AppendRow([]interface{}{"Hostname", server.Hostname})
+	summaryTable.AppendRow([]interface{}{"UUID", server.UUID})
+	summaryTable.AppendRow([]interface{}{"State", server.State})
+	summaryTable.AppendRow([]interface{}{"Zone", server.Zone})
+	summaryTable.AppendRow([]interface{}{"Plan", server.Plan})
+	summaryTable.AppendRow([]interface{}{"Public IP", server.PublicIP})
+
+	fmt.Println(summaryTable.Render())
+	fmt.Println()
+
 	actions := []ActionItem{
-		{Name: "Show details", Command: "show"},
+		{Name: "Show details", Command: "show", Enabled: true},
 		{Name: "Start server", Command: "start", Enabled: server.State == "stopped"},
 		{Name: "Restart server", Command: "restart", Enabled: server.State == "started"},
 		{Name: "Stop server", Command: "stop", Enabled: server.State == "started"},
-		{Name: "Delete server", Command: "delete", Enabled: true},
+		{Name: "Delete server", Command: "delete", Enabled: server.State == "stopped"},
+		{Name: "Back to server list", Command: "back", Enabled: true},
 		{Name: "Exit", Command: "exit", Enabled: true},
 	}
 
@@ -457,13 +459,164 @@ type ActionItem struct {
 	Enabled bool
 }
 
+// createBoxedTable creates a table with a nice boxed style and fixed width
+func createBoxedTable() table.Writer {
+	t := table.NewWriter()
+	t.SetStyle(table.Style{
+		Name: "ServerDetails",
+		Box: table.BoxStyle{
+			BottomLeft:       "┗",
+			BottomRight:      "┛",
+			BottomSeparator:  "┻",
+			Left:             "┃",
+			LeftSeparator:    "┣",
+			MiddleHorizontal: "━",
+			MiddleSeparator:  "╋",
+			MiddleVertical:   "┃",
+			PaddingLeft:      " ",
+			PaddingRight:     " ",
+			Right:            "┃",
+			RightSeparator:   "┫",
+			TopLeft:          "┏",
+			TopRight:         "┓",
+			TopSeparator:     "┳",
+			UnfinishedRow:    " ",
+		},
+		Options: table.Options{
+			DrawBorder:      true,
+			SeparateColumns: true,
+			SeparateHeader:  true,
+			SeparateRows:    false,
+		},
+	})
+
+	// Set fixed column widths to prevent border shifting
+	t.SetColumnConfigs([]table.ColumnConfig{
+		{Number: 1, WidthMax: 17, WidthMin: 17}, // Fixed width for labels
+		{Number: 2, WidthMax: 75, WidthMin: 75}, // Fixed width for values
+	})
+
+	return t
+}
+
+// showEnhancedServerDetails displays server information in beautiful ASCII tables
+func (ls *listCommand) showEnhancedServerDetails(server ServerItem, exec commands.Executor) (output.Output, error) {
+	// Get full server details
+	fullServer, err := exec.All().GetServerDetails(exec.Context(), &request.GetServerDetailsRequest{UUID: server.UUID})
+	if err != nil {
+		return nil, err
+	}
+
+	// Clear screen and show enhanced details
+	fmt.Print("\033[2J\033[H")
+
+	// Common Information Table
+	commonTable := createBoxedTable()
+	commonTable.SetTitle("Server Information")
+	commonTable.AppendRow([]interface{}{"UUID", fullServer.UUID})
+	commonTable.AppendRow([]interface{}{"Hostname", fullServer.Hostname})
+	commonTable.AppendRow([]interface{}{"Title", fullServer.Title})
+	commonTable.AppendRow([]interface{}{"Plan", fullServer.Plan})
+	commonTable.AppendRow([]interface{}{"Zone", fullServer.Zone})
+	commonTable.AppendRow([]interface{}{"State", fullServer.State})
+	commonTable.AppendRow([]interface{}{"CPU Cores", fmt.Sprintf("%d", fullServer.CoreNumber)})
+	commonTable.AppendRow([]interface{}{"Memory", fmt.Sprintf("%d MB", fullServer.MemoryAmount)})
+	commonTable.AppendRow([]interface{}{"Host ID", fmt.Sprintf("%d", fullServer.Host)})
+	commonTable.AppendRow([]interface{}{"Timezone", fullServer.Timezone})
+	if fullServer.SimpleBackup == "yes" {
+		commonTable.AppendRow([]interface{}{"Simple Backup", "Enabled"})
+	} else {
+		commonTable.AppendRow([]interface{}{"Simple Backup", "Disabled"})
+	}
+
+	fmt.Println(commonTable.Render())
+	fmt.Println()
+
+	// Network Interfaces Table
+	if len(fullServer.Networking.Interfaces) > 0 {
+		nicTable := createBoxedTable()
+		nicTable.SetTitle("Network Interfaces")
+		nicTable.AppendHeader([]interface{}{"#", "Type", "IP Address", "MAC Address", "Network"})
+
+		// Set compact column widths for Network Interfaces
+		nicTable.SetColumnConfigs([]table.ColumnConfig{
+			{Number: 1, WidthMax: 3, WidthMin: 1},   // # column - just needs 1-3 chars
+			{Number: 2, WidthMax: 8, WidthMin: 4},   // Type column - "public", "private", "utility"
+			{Number: 3, WidthMax: 45, WidthMin: 40}, // IP Address column - fits "IPv6: 2a04:3543:1000:2310:607d:24ff:feef:3946"
+			{Number: 4, WidthMax: 18, WidthMin: 17}, // MAC Address column (standard MAC length)
+			{Number: 5, WidthMax: 36, WidthMin: 36}, // Network column - fits UUID "03000000-0000-4000-8083-000000000000"
+		})
+
+		for i, iface := range fullServer.Networking.Interfaces {
+			for _, ip := range iface.IPAddresses {
+				nicTable.AppendRow([]interface{}{
+					i + 1,
+					iface.Type,
+					fmt.Sprintf("%s: %s", ip.Family, ip.Address),
+					iface.MAC,
+					iface.Network,
+				})
+			}
+		}
+
+		fmt.Println(nicTable.Render())
+		fmt.Println()
+	}
+
+	// Storage Devices Table
+	if len(fullServer.StorageDevices) > 0 {
+		storageTable := createBoxedTable()
+		storageTable.SetTitle("Storage Devices")
+		storageTable.AppendHeader([]interface{}{"UUID", "Title", "Size (GB)", "Type", "Address"})
+
+		// Set optimized column widths for Storage Devices
+		storageTable.SetColumnConfigs([]table.ColumnConfig{
+			{Number: 1, WidthMax: 36, WidthMin: 36}, // UUID column - fits "0100d1f1-1a35-4a48-af83-affd557f03f0"
+			{Number: 2, WidthMax: 36, WidthMin: 20}, // Title column - same max width as UUID, flexible min
+			{Number: 3, WidthMax: 10, WidthMin: 8},  // Size (GB) column - compact for numbers
+			{Number: 4, WidthMax: 12, WidthMin: 8},  // Type column - compact for storage types
+			{Number: 5, WidthMax: 15, WidthMin: 10}, // Address column - compact for addresses like "virtio:0"
+		})
+
+		for _, storage := range fullServer.StorageDevices {
+			storageTable.AppendRow([]interface{}{
+				storage.UUID,
+				storage.Title,
+				storage.Size,
+				storage.Type,
+				storage.Address,
+			})
+		}
+
+		fmt.Println(storageTable.Render())
+		fmt.Println()
+	}
+
+	// Tags Table (if any)
+	if len(fullServer.Tags) > 0 {
+		tagsTable := createBoxedTable()
+		tagsTable.SetTitle("Tags")
+		for _, tag := range fullServer.Tags {
+			tagsTable.AppendRow([]interface{}{tag})
+		}
+
+		fmt.Println(tagsTable.Render())
+		fmt.Println()
+	}
+
+	fmt.Println("Press Enter to continue...")
+	fmt.Scanln()
+
+	// Return to action menu
+	return ls.showActionMenu(server, exec)
+}
+
 // executeAction performs the selected action on the server
 func (ls *listCommand) executeAction(action ActionItem, server ServerItem, exec commands.Executor) (output.Output, error) {
 	switch action.Command {
 	case "show":
-		// Use the existing show command functionality
-		showCmd := ShowCommand().(*showCommand)
-		return showCmd.Execute(exec, server.UUID)
+		// Use our enhanced server details display
+		return ls.showEnhancedServerDetails(server, exec)
 	case "start":
 		startCmd := StartCommand().(*startCommand)
 		return startCmd.Execute(exec, server.UUID)
@@ -492,6 +645,13 @@ func (ls *listCommand) executeAction(action ActionItem, server ServerItem, exec 
 
 		deleteCmd := DeleteCommand().(*deleteCommand)
 		return deleteCmd.Execute(exec, server.UUID)
+	case "back":
+		// Return to server selection - fetch fresh server list
+		servers, err := exec.All().GetServers(exec.Context())
+		if err != nil {
+			return nil, err
+		}
+		return ls.handleInteractiveMode(servers, exec)
 	case "exit":
 		return output.OnlyMarshaled{Value: "Goodbye!"}, nil
 	default:
