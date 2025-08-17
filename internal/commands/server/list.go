@@ -492,6 +492,18 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.view = serverDetailsView
 		m.selected = 0
 		return m, nil
+	case loadServerListMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			m.quitting = true
+			return m, tea.Quit
+		}
+		
+		// Successfully loaded server list
+		m.servers = msg.servers
+		m.view = serverSelectionView
+		m.selected = 0
+		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
@@ -550,8 +562,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "esc":
 			if m.view == serverDetailsView {
-				m.view = serverSelectionView
-				m.selected = 0
+				m.loadingMsg = "Refreshing server list..."
+				m.view = loadingView
+				return m, m.loadServerListCmd()
 			} else if m.view == loadingView {
 				m.view = serverSelectionView
 				m.selected = 0
@@ -617,6 +630,12 @@ type loadServerDetailsMsg struct {
 	err           error
 }
 
+// loadServerListMsg is a message that contains loaded server list
+type loadServerListMsg struct {
+	servers []ServerItem
+	err     error
+}
+
 // loadServerDetailsCmd loads server details asynchronously
 func (m tuiModel) loadServerDetailsCmd() tea.Cmd {
 	return func() tea.Msg {
@@ -639,6 +658,79 @@ func (m tuiModel) loadServerDetailsCmd() tea.Cmd {
 			details:       details,
 			firewallRules: fwRules,
 			err:           nil,
+		}
+	}
+}
+
+// loadServerListCmd loads server list asynchronously
+func (m tuiModel) loadServerListCmd() tea.Cmd {
+	return func() tea.Msg {
+		// Get servers
+		servers, err := m.exec.All().GetServers(m.exec.Context())
+		if err != nil {
+			return loadServerListMsg{err: err}
+		}
+		
+		// Convert to ServerItem format (same logic as original)
+		serverItems := make([]ServerItem, len(servers.Servers))
+		
+		// Fetch IP addresses for all servers in parallel
+		type serverWithIP struct {
+			index    int
+			publicIP string
+			err      error
+		}
+		
+		ipChan := make(chan serverWithIP, len(servers.Servers))
+		var wg sync.WaitGroup
+		
+		for i, server := range servers.Servers {
+			wg.Add(1)
+			go func(idx int, srv upcloud.Server) {
+				defer wg.Done()
+				publicIP := getServerPublicIP(srv.UUID, m.exec)
+				ipChan <- serverWithIP{index: idx, publicIP: publicIP, err: nil}
+			}(i, server)
+		}
+		
+		go func() {
+			wg.Wait()
+			close(ipChan)
+		}()
+		
+		// Collect IP results
+		ipResults := make(map[int]string)
+		for result := range ipChan {
+			ipResults[result.index] = result.publicIP
+		}
+		
+		// Create server items with IP addresses
+		for i, server := range servers.Servers {
+			plan := server.Plan
+			if plan == customPlan {
+				memory := server.MemoryAmount / 1024
+				plan = fmt.Sprintf("%dxCPU-%dGB (custom)", server.CoreNumber, memory)
+			}
+			
+			publicIP := ipResults[i]
+			if publicIP == "" {
+				publicIP = "N/A"
+			}
+			
+			serverItems[i] = ServerItem{
+				UUID:     server.UUID,
+				Hostname: server.Hostname,
+				Plan:     plan,
+				Zone:     server.Zone,
+				State:    server.State,
+				PublicIP: publicIP,
+				Server:   server,
+			}
+		}
+		
+		return loadServerListMsg{
+			servers: serverItems,
+			err:     nil,
 		}
 	}
 }
@@ -1032,9 +1124,9 @@ func (m tuiModel) handleDetailsNavigation() (tea.Model, tea.Cmd) {
 	case "Delete server":
 		return m.executeServerAction("delete")
 	case "Back to server list":
-		m.view = serverSelectionView
-		m.selected = 0
-		return m, nil
+		m.loadingMsg = "Refreshing server list..."
+		m.view = loadingView
+		return m, m.loadServerListCmd()
 	default:
 		return m, nil
 	}
@@ -1090,10 +1182,10 @@ func (m tuiModel) executeServerAction(action string) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		}
-		// Go back to server list after deletion
-		m.view = serverSelectionView
-		m.selected = 0
-		return m, nil
+		// Go back to server list after deletion with refresh
+		m.loadingMsg = "Refreshing server list..."
+		m.view = loadingView
+		return m, m.loadServerListCmd()
 	default:
 		return m, nil
 	}
