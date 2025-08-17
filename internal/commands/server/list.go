@@ -43,7 +43,47 @@ var (
 	helpStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241")).
 			Italic(true)
+
+	// Server state colors (using soothing colors similar to Claude's output)
+	stateStartedStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("34")). // Softer green
+				Bold(true)
+	stateStoppedStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#E55A5A")). // More reddish, less pink
+				Bold(true)
+	stateMaintenanceStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("208")). // Orange
+				Bold(true)
+	stateErrorStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")). // Muted gray (like the "+32 lines" text)
+			Bold(true)
 )
+
+// getStateStyle returns the appropriate lipgloss style for a server state
+func getStateStyle(state string) lipgloss.Style {
+	switch state {
+	case "started":
+		return stateStartedStyle
+	case "stopped":
+		return stateStoppedStyle
+	case "maintenance":
+		return stateMaintenanceStyle
+	case "error":
+		return stateErrorStyle
+	default:
+		return normalStyle
+	}
+}
+
+// abbreviateState returns a shortened version of server state for better table alignment
+func abbreviateState(state string) string {
+	switch state {
+	case "maintenance":
+		return "maint"
+	default:
+		return state
+	}
+}
 
 // TUI Models
 type viewType int
@@ -443,7 +483,7 @@ func (m tuiModel) Init() tea.Cmd {
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		if m.view == serverDetailsView {
@@ -456,17 +496,17 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		}
-		
+
 		// Successfully loaded server details
 		m.serverDetails = msg.details
 		m.firewallRules = msg.firewallRules
-		
+
 		// Build navigation options including server actions
 		m.detailsOptions = []string{"Server overview"}
 		if msg.details.Firewall == "on" {
 			m.detailsOptions = append(m.detailsOptions, "Firewall rules")
 		}
-		
+
 		// Add server actions based on state
 		if m.currentServer.State == "stopped" {
 			m.detailsOptions = append(m.detailsOptions, "Start server")
@@ -478,17 +518,17 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.currentServer.State == "stopped" {
 			m.detailsOptions = append(m.detailsOptions, "Delete server")
 		}
-		
+
 		// Always add back option
 		m.detailsOptions = append(m.detailsOptions, "Back to server list")
-		
+
 		// Set up viewport and show server overview by default
 		termWidth, termHeight := terminal.GetTerminalSize()
 		m.setupViewport(termWidth, termHeight)
 		m.currentContent = overviewContent
 		content := m.renderOverviewContent()
 		m.viewport.SetContent(content)
-		
+
 		m.view = serverDetailsView
 		m.selected = 0
 		return m, nil
@@ -498,7 +538,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		}
-		
+
 		// Successfully loaded server list
 		m.servers = msg.servers
 		m.view = serverSelectionView
@@ -571,7 +611,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-	
+
 	return m, cmd
 }
 
@@ -583,18 +623,18 @@ func (m *tuiModel) setupViewport(termWidth, termHeight int) {
 	if termHeight <= 0 {
 		termHeight = 24
 	}
-	
+
 	// Calculate space for fixed elements
-	headerHeight := 3  // "Server Details: ..." + spacing
-	navigationHeight := len(m.detailsOptions) + 3  // Navigation options + spacing + help text
-	marginHeight := 2  // Top/bottom margins
-	
+	headerHeight := 3                             // "Server Details: ..." + spacing
+	navigationHeight := len(m.detailsOptions) + 3 // Navigation options + spacing + help text
+	marginHeight := 2                             // Top/bottom margins
+
 	// Available height for scrollable content
 	availableHeight := termHeight - headerHeight - navigationHeight - marginHeight
 	if availableHeight < 5 {
-		availableHeight = 5  // Minimum viewport height
+		availableHeight = 5 // Minimum viewport height
 	}
-	
+
 	// Setup or update viewport
 	if m.viewport.Width == 0 {
 		// First time setup
@@ -644,7 +684,7 @@ func (m tuiModel) loadServerDetailsCmd() tea.Cmd {
 		if err != nil {
 			return loadServerDetailsMsg{err: err}
 		}
-		
+
 		// Load firewall rules if firewall is enabled
 		var fwRules *upcloud.FirewallRules
 		if details.Firewall == "on" {
@@ -653,7 +693,7 @@ func (m tuiModel) loadServerDetailsCmd() tea.Cmd {
 				fwRules = rules
 			}
 		}
-		
+
 		return loadServerDetailsMsg{
 			details:       details,
 			firewallRules: fwRules,
@@ -670,20 +710,20 @@ func (m tuiModel) loadServerListCmd() tea.Cmd {
 		if err != nil {
 			return loadServerListMsg{err: err}
 		}
-		
+
 		// Convert to ServerItem format (same logic as original)
 		serverItems := make([]ServerItem, len(servers.Servers))
-		
+
 		// Fetch IP addresses for all servers in parallel
 		type serverWithIP struct {
 			index    int
 			publicIP string
 			err      error
 		}
-		
+
 		ipChan := make(chan serverWithIP, len(servers.Servers))
 		var wg sync.WaitGroup
-		
+
 		for i, server := range servers.Servers {
 			wg.Add(1)
 			go func(idx int, srv upcloud.Server) {
@@ -692,18 +732,18 @@ func (m tuiModel) loadServerListCmd() tea.Cmd {
 				ipChan <- serverWithIP{index: idx, publicIP: publicIP, err: nil}
 			}(i, server)
 		}
-		
+
 		go func() {
 			wg.Wait()
 			close(ipChan)
 		}()
-		
+
 		// Collect IP results
 		ipResults := make(map[int]string)
 		for result := range ipChan {
 			ipResults[result.index] = result.publicIP
 		}
-		
+
 		// Create server items with IP addresses
 		for i, server := range servers.Servers {
 			plan := server.Plan
@@ -711,12 +751,12 @@ func (m tuiModel) loadServerListCmd() tea.Cmd {
 				memory := server.MemoryAmount / 1024
 				plan = fmt.Sprintf("%dxCPU-%dGB (custom)", server.CoreNumber, memory)
 			}
-			
+
 			publicIP := ipResults[i]
 			if publicIP == "" {
 				publicIP = "N/A"
 			}
-			
+
 			serverItems[i] = ServerItem{
 				UUID:     server.UUID,
 				Hostname: server.Hostname,
@@ -727,7 +767,7 @@ func (m tuiModel) loadServerListCmd() tea.Cmd {
 				Server:   server,
 			}
 		}
-		
+
 		return loadServerListMsg{
 			servers: serverItems,
 			err:     nil,
@@ -737,18 +777,18 @@ func (m tuiModel) loadServerListCmd() tea.Cmd {
 
 func (m tuiModel) renderLoading() string {
 	var b strings.Builder
-	
+
 	// Header
 	b.WriteString(headerStyle.Render("UpCloud CLI Plus"))
 	b.WriteString("\n\n")
-	
+
 	// Loading message
 	b.WriteString(selectedStyle.Render(m.loadingMsg))
 	b.WriteString("\n\n")
-	
+
 	// Help text
 	b.WriteString(helpStyle.Render("Please wait..."))
-	
+
 	return b.String()
 }
 
@@ -766,13 +806,31 @@ func (m tuiModel) renderServerSelection() string {
 
 	// Server list
 	for i, server := range m.servers {
-		line := fmt.Sprintf("%-38s %-25s %-23s %-9s %-9s %s",
-			server.UUID, server.Hostname, server.Plan, server.Zone, server.State, server.PublicIP)
+		// Build the line with colored state column
+		uuid := fmt.Sprintf("%-38s", server.UUID)
+		hostname := fmt.Sprintf("%-25s", server.Hostname)
+		plan := fmt.Sprintf("%-23s", server.Plan)
+		zone := fmt.Sprintf("%-9s", server.Zone)
+		stateAbbrev := abbreviateState(server.State)
+		state := fmt.Sprintf("%-9s", stateAbbrev)
+		publicIP := server.PublicIP
+
+		// Apply state color to the state column (using original state for color lookup)
+		stateColored := getStateStyle(server.State).Render(state)
+
+		// Build the complete line
+		linePrefix := fmt.Sprintf("%s %s %s %s ", uuid, hostname, plan, zone)
+		lineSuffix := fmt.Sprintf(" %s", publicIP)
 
 		if i == m.selected {
-			b.WriteString(selectedStyle.Render("> " + line))
+			// For selected row, apply purple background to everything except the colored state
+			b.WriteString(selectedStyle.Render("> " + linePrefix))
+			b.WriteString(stateColored)
+			b.WriteString(selectedStyle.Render(lineSuffix))
 		} else {
-			b.WriteString(normalStyle.Render("  " + line))
+			b.WriteString(normalStyle.Render("  " + linePrefix))
+			b.WriteString(stateColored)
+			b.WriteString(normalStyle.Render(lineSuffix))
 		}
 		b.WriteString("\n")
 	}
@@ -781,7 +839,6 @@ func (m tuiModel) renderServerSelection() string {
 	b.WriteString(helpStyle.Render("↑/↓: navigate • enter: select • q/ctrl+c: quit"))
 	return b.String()
 }
-
 
 func (m tuiModel) renderServerDetails() string {
 	var b strings.Builder
@@ -809,7 +866,7 @@ func (m tuiModel) renderServerDetails() string {
 	}
 
 	b.WriteString("\n")
-	
+
 	// Show scroll indicators and help
 	scrollInfo := ""
 	if !m.viewport.AtTop() && !m.viewport.AtBottom() {
@@ -819,10 +876,10 @@ func (m tuiModel) renderServerDetails() string {
 	} else if !m.viewport.AtBottom() {
 		scrollInfo = "▼ "
 	}
-	
+
 	helpText := fmt.Sprintf("%s↑/↓: navigate • fn+↑/↓: scroll content • enter: select • esc: back", scrollInfo)
 	b.WriteString(helpStyle.Render(helpText))
-	
+
 	return b.String()
 }
 
@@ -1191,7 +1248,6 @@ func (m tuiModel) executeServerAction(action string) (tea.Model, tea.Cmd) {
 	}
 }
 
-
 func (m tuiModel) getActionsForServer(server ServerItem) []ActionItem {
 	actions := []ActionItem{
 		{Name: "Show details", Command: "show", Enabled: true},
@@ -1212,7 +1268,6 @@ func (m tuiModel) getActionsForServer(server ServerItem) []ActionItem {
 
 	return enabledActions
 }
-
 
 // handleDeleteConfirmation handles server deletion with confirmation
 func (ls *listCommand) handleDeleteConfirmation(uuid string, exec commands.Executor) (output.Output, error) {
