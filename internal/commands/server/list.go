@@ -17,6 +17,7 @@ import (
 	"github.com/UpCloudLtd/upcloud-cli/v3/internal/ui"
 	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud"
 	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/request"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -49,7 +50,6 @@ type viewType int
 
 const (
 	serverSelectionView viewType = iota
-	actionMenuView
 	serverDetailsView
 )
 
@@ -65,11 +65,12 @@ type tuiModel struct {
 	servers        []ServerItem
 	selected       int
 	currentServer  ServerItem
-	actions        []ActionItem
 	detailsOptions []string
 	currentContent detailContentType
 	serverDetails  *upcloud.ServerDetails
 	firewallRules  *upcloud.FirewallRules
+	viewport       viewport.Model
+	contentHeight  int
 	exec           commands.Executor
 	listCmd        *listCommand
 	quitting       bool
@@ -439,7 +440,14 @@ func (m tuiModel) Init() tea.Cmd {
 }
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		if m.view == serverDetailsView {
+			// Update viewport dimensions when window size changes
+			m.setupViewport(msg.Width, msg.Height)
+		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
@@ -450,11 +458,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.selected > 0 {
 					m.selected--
 				}
-			} else if m.view == actionMenuView {
-				if m.selected > 0 {
-					m.selected--
-				}
 			} else if m.view == serverDetailsView {
+				// In server details view, always navigate menu options
 				if m.selected > 0 {
 					m.selected--
 				}
@@ -464,40 +469,79 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.selected < len(m.servers)-1 {
 					m.selected++
 				}
-			} else if m.view == actionMenuView {
-				if m.selected < len(m.actions)-1 {
-					m.selected++
-				}
 			} else if m.view == serverDetailsView {
+				// In server details view, always navigate menu options
 				if m.selected < len(m.detailsOptions)-1 {
 					m.selected++
 				}
+			}
+		case "pgup":
+			if m.view == serverDetailsView {
+				// Line-by-line scrolling up (instead of page scrolling)
+				m.viewport.LineUp(1)
+			}
+		case "pgdown":
+			if m.view == serverDetailsView {
+				// Line-by-line scrolling down (instead of page scrolling)
+				m.viewport.LineDown(1)
+			}
+		case "home":
+			if m.view == serverDetailsView {
+				m.viewport.GotoTop()
+			}
+		case "end":
+			if m.view == serverDetailsView {
+				m.viewport.GotoBottom()
 			}
 		case "enter":
 			switch m.view {
 			case serverSelectionView:
 				m.currentServer = m.servers[m.selected]
-				m.actions = m.getActionsForServer(m.currentServer)
-				m.view = actionMenuView
-				m.selected = 0
-			case actionMenuView:
-				action := m.actions[m.selected]
-				return m.executeAction(action)
+				return m.showServerDetails()
 			case serverDetailsView:
 				// Handle details navigation options
 				return m.handleDetailsNavigation()
 			}
 		case "esc":
-			if m.view == actionMenuView {
+			if m.view == serverDetailsView {
 				m.view = serverSelectionView
-				m.selected = 0
-			} else if m.view == serverDetailsView {
-				m.view = actionMenuView
 				m.selected = 0
 			}
 		}
 	}
-	return m, nil
+	
+	return m, cmd
+}
+
+// setupViewport initializes or updates the viewport dimensions
+func (m *tuiModel) setupViewport(termWidth, termHeight int) {
+	if termWidth <= 0 {
+		termWidth = 80
+	}
+	if termHeight <= 0 {
+		termHeight = 24
+	}
+	
+	// Calculate space for fixed elements
+	headerHeight := 3  // "📊 Server Details: ..." + spacing
+	navigationHeight := len(m.detailsOptions) + 3  // Navigation options + spacing + help text
+	marginHeight := 2  // Top/bottom margins
+	
+	// Available height for scrollable content
+	availableHeight := termHeight - headerHeight - navigationHeight - marginHeight
+	if availableHeight < 5 {
+		availableHeight = 5  // Minimum viewport height
+	}
+	
+	// Setup or update viewport
+	if m.viewport.Width == 0 {
+		// First time setup
+		m.viewport = viewport.New(termWidth, availableHeight)
+	} else {
+		// Update existing viewport
+		m.viewport.Width = termWidth
+		m.viewport.Height = availableHeight
+	}
 }
 
 func (m tuiModel) View() string {
@@ -508,8 +552,6 @@ func (m tuiModel) View() string {
 	switch m.view {
 	case serverSelectionView:
 		return m.renderServerSelection()
-	case actionMenuView:
-		return m.renderActionMenu()
 	case serverDetailsView:
 		return m.renderServerDetails()
 	default:
@@ -547,41 +589,20 @@ func (m tuiModel) renderServerSelection() string {
 	return b.String()
 }
 
-func (m tuiModel) renderActionMenu() string {
-	var b strings.Builder
-
-	b.WriteString(headerStyle.Render(fmt.Sprintf("⚡ Actions for %s (%s)", m.currentServer.Hostname, m.currentServer.State)))
-	b.WriteString("\n\n")
-
-	for i, action := range m.actions {
-		if i == m.selected {
-			b.WriteString(selectedStyle.Render("> " + action.Name))
-		} else {
-			b.WriteString(normalStyle.Render("  " + action.Name))
-		}
-		b.WriteString("\n")
-	}
-
-	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("↑/↓: navigate • enter: select • esc: back • q/ctrl+c: quit"))
-	return b.String()
-}
 
 func (m tuiModel) renderServerDetails() string {
 	var b strings.Builder
 
-	b.WriteString(headerStyle.Render(fmt.Sprintf("📊 Server Details: %s", m.currentServer.Hostname)))
+	// Header (fixed at top)
+	header := headerStyle.Render(fmt.Sprintf("📊 Server Details: %s", m.currentServer.Hostname))
+	b.WriteString(header)
 	b.WriteString("\n\n")
 
-	// Render content based on current selection
-	switch m.currentContent {
-	case overviewContent:
-		b.WriteString(m.renderOverviewContent())
-	case firewallContent:
-		b.WriteString(m.renderFirewallContent())
-	}
+	// Render viewport (scrollable content area)
+	b.WriteString(m.viewport.View())
+	b.WriteString("\n")
 
-	// Navigation options
+	// Navigation options (fixed at bottom)
 	b.WriteString(headerStyle.Render("Navigation Options:"))
 	b.WriteString("\n")
 
@@ -595,7 +616,20 @@ func (m tuiModel) renderServerDetails() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("↑/↓: navigate options • enter: select • esc: back to actions • q/ctrl+c: quit"))
+	
+	// Show scroll indicators and help
+	scrollInfo := ""
+	if !m.viewport.AtTop() && !m.viewport.AtBottom() {
+		scrollInfo = "▲▼ "
+	} else if !m.viewport.AtTop() {
+		scrollInfo = "▲ "
+	} else if !m.viewport.AtBottom() {
+		scrollInfo = "▼ "
+	}
+	
+	helpText := fmt.Sprintf("%s↑/↓: navigate • fn+↑/↓: scroll content • enter: select • esc: back", scrollInfo)
+	b.WriteString(helpStyle.Render(helpText))
+	
 	return b.String()
 }
 
@@ -876,14 +910,26 @@ func (m tuiModel) handleDetailsNavigation() (tea.Model, tea.Cmd) {
 	switch selectedOption {
 	case "Server overview":
 		m.currentContent = overviewContent
+		// Update viewport content
+		content := m.renderOverviewContent()
+		m.viewport.SetContent(content)
+		m.viewport.GotoTop()
 		return m, nil
 	case "Firewall rules":
 		m.currentContent = firewallContent
+		// Update viewport content
+		content := m.renderFirewallContent()
+		m.viewport.SetContent(content)
+		m.viewport.GotoTop()
 		return m, nil
-	case "Back to actions":
-		m.view = actionMenuView
-		m.selected = 0
-		return m, nil
+	case "Start server":
+		return m.executeServerAction("start")
+	case "Restart server":
+		return m.executeServerAction("restart")
+	case "Stop server":
+		return m.executeServerAction("stop")
+	case "Delete server":
+		return m.executeServerAction("delete")
 	case "Back to server list":
 		m.view = serverSelectionView
 		m.selected = 0
@@ -891,6 +937,110 @@ func (m tuiModel) handleDetailsNavigation() (tea.Model, tea.Cmd) {
 	default:
 		return m, nil
 	}
+}
+
+func (m tuiModel) executeServerAction(action string) (tea.Model, tea.Cmd) {
+	// Perform the server action
+	switch action {
+	case "start":
+		startCmd := StartCommand().(*startCommand)
+		_, err := startCmd.Execute(m.exec, m.currentServer.UUID)
+		if err != nil {
+			m.err = err
+			m.quitting = true
+			return m, tea.Quit
+		}
+		// Update server state and refresh details
+		m.currentServer.State = "started"
+		return m.showServerDetails()
+	case "restart":
+		restartCmd := RestartCommand().(*restartCommand)
+		_, err := restartCmd.Execute(m.exec, m.currentServer.UUID)
+		if err != nil {
+			m.err = err
+			m.quitting = true
+			return m, tea.Quit
+		}
+		// Keep state as "started" after restart
+		return m.showServerDetails()
+	case "stop":
+		stopCmd := StopCommand().(*stopCommand)
+		_, err := stopCmd.Execute(m.exec, m.currentServer.UUID)
+		if err != nil {
+			m.err = err
+			m.quitting = true
+			return m, tea.Quit
+		}
+		// Update server state and refresh details
+		m.currentServer.State = "stopped"
+		return m.showServerDetails()
+	case "delete":
+		// For delete, we need to confirm and then exit to server list
+		deleteCmd := DeleteCommand().(*deleteCommand)
+		_, err := deleteCmd.Execute(m.exec, m.currentServer.UUID)
+		if err != nil {
+			m.err = err
+			m.quitting = true
+			return m, tea.Quit
+		}
+		// Go back to server list after deletion
+		m.view = serverSelectionView
+		m.selected = 0
+		return m, nil
+	default:
+		return m, nil
+	}
+}
+
+func (m tuiModel) showServerDetails() (tea.Model, tea.Cmd) {
+	// Load server details and firewall rules
+	details, err := m.exec.All().GetServerDetails(m.exec.Context(), &request.GetServerDetailsRequest{UUID: m.currentServer.UUID})
+	if err != nil {
+		m.err = err
+		m.quitting = true
+		return m, tea.Quit
+	}
+	m.serverDetails = details
+	
+	// Load firewall rules if firewall is enabled
+	if details.Firewall == "on" {
+		fwRules, fwErr := m.exec.All().GetFirewallRules(m.exec.Context(), &request.GetFirewallRulesRequest{ServerUUID: m.currentServer.UUID})
+		if fwErr == nil {
+			m.firewallRules = fwRules
+		}
+	}
+	
+	// Build navigation options including server actions
+	m.detailsOptions = []string{"Server overview"}
+	if details.Firewall == "on" {
+		m.detailsOptions = append(m.detailsOptions, "Firewall rules")
+	}
+	
+	// Add server actions based on state
+	if m.currentServer.State == "stopped" {
+		m.detailsOptions = append(m.detailsOptions, "Start server")
+	}
+	if m.currentServer.State == "started" {
+		m.detailsOptions = append(m.detailsOptions, "Restart server")
+		m.detailsOptions = append(m.detailsOptions, "Stop server")
+	}
+	if m.currentServer.State == "stopped" {
+		m.detailsOptions = append(m.detailsOptions, "Delete server")
+	}
+	
+	// Always add back option
+	m.detailsOptions = append(m.detailsOptions, "Back to server list")
+	
+	// Set up viewport and show server overview by default
+	termWidth, termHeight := terminal.GetTerminalSize()
+	m.setupViewport(termWidth, termHeight)
+	m.currentContent = overviewContent
+	content := m.renderOverviewContent()
+	m.viewport.SetContent(content)
+	
+	m.view = serverDetailsView
+	m.selected = 0
+	return m, nil
 }
 
 func (m tuiModel) getActionsForServer(server ServerItem) []ActionItem {
@@ -901,7 +1051,6 @@ func (m tuiModel) getActionsForServer(server ServerItem) []ActionItem {
 		{Name: "Stop server", Command: "stop", Enabled: server.State == "started"},
 		{Name: "Delete server", Command: "delete", Enabled: server.State == "stopped"},
 		{Name: "Back to server list", Command: "back", Enabled: true},
-		{Name: "Exit", Command: "exit", Enabled: true},
 	}
 
 	// Filter enabled actions
@@ -915,83 +1064,6 @@ func (m tuiModel) getActionsForServer(server ServerItem) []ActionItem {
 	return enabledActions
 }
 
-func (m tuiModel) executeAction(action ActionItem) (tea.Model, tea.Cmd) {
-	switch action.Command {
-	case "show":
-		// Load server details and firewall rules
-		details, err := m.exec.All().GetServerDetails(m.exec.Context(), &request.GetServerDetailsRequest{UUID: m.currentServer.UUID})
-		if err != nil {
-			m.err = err
-			m.quitting = true
-			return m, tea.Quit
-		}
-		m.serverDetails = details
-
-		// Load firewall rules if firewall is enabled
-		if details.Firewall == "on" {
-			fwRules, fwErr := m.exec.All().GetFirewallRules(m.exec.Context(), &request.GetFirewallRulesRequest{ServerUUID: m.currentServer.UUID})
-			if fwErr == nil {
-				m.firewallRules = fwRules
-			}
-		}
-
-		// Build navigation options dynamically
-		m.detailsOptions = []string{"Server overview"}
-
-		// Only add firewall option if firewall is enabled and has rules
-		if details.Firewall == "on" && m.firewallRules != nil && len(m.firewallRules.FirewallRules) > 0 {
-			m.detailsOptions = append(m.detailsOptions, "Firewall rules")
-		}
-
-		// Add standard navigation options (removed "Exit" as requested)
-		m.detailsOptions = append(m.detailsOptions, []string{
-			"Back to actions",
-			"Back to server list",
-		}...)
-
-		m.currentContent = overviewContent // Start with overview
-		m.view = serverDetailsView
-		m.selected = 0
-		return m, nil
-	case "start":
-		startCmd := StartCommand().(*startCommand)
-		result, err := startCmd.Execute(m.exec, m.currentServer.UUID)
-		m.result = result
-		m.err = err
-		m.quitting = true
-		return m, tea.Quit
-	case "restart":
-		restartCmd := RestartCommand().(*restartCommand)
-		result, err := restartCmd.Execute(m.exec, m.currentServer.UUID)
-		m.result = result
-		m.err = err
-		m.quitting = true
-		return m, tea.Quit
-	case "stop":
-		stopCmd := StopCommand().(*stopCommand)
-		result, err := stopCmd.Execute(m.exec, m.currentServer.UUID)
-		m.result = result
-		m.err = err
-		m.quitting = true
-		return m, tea.Quit
-	case "delete":
-		// For delete, we'll quit TUI and handle confirmation outside
-		m.result = output.OnlyMarshaled{Value: "delete_confirm:" + m.currentServer.UUID}
-		m.quitting = true
-		return m, tea.Quit
-	case "back":
-		m.view = serverSelectionView
-		m.selected = 0
-		return m, nil
-	case "exit":
-		m.quitting = true
-		return m, tea.Quit
-	default:
-		m.err = fmt.Errorf("unknown action: %s", action.Command)
-		m.quitting = true
-		return m, tea.Quit
-	}
-}
 
 // handleDeleteConfirmation handles server deletion with confirmation
 func (ls *listCommand) handleDeleteConfirmation(uuid string, exec commands.Executor) (output.Output, error) {
@@ -1071,8 +1143,8 @@ func (ls *listCommand) handleShowDetailsAndReturn(uuid string, servers *upcloud.
 	ls.showDetailsOnly(serverItem, exec)
 
 	// Ask user what to do next
-	fmt.Printf("\n\n[1] Back to server actions  [2] Back to server list  [3] Exit\n")
-	fmt.Printf("Choose option (1-3): ")
+	fmt.Printf("\n\n[1] Back to server actions  [2] Back to server list\n")
+	fmt.Printf("Choose option (1-2): ")
 
 	reader := bufio.NewReader(os.Stdin)
 	input, err := reader.ReadString('\n')
@@ -1088,9 +1160,6 @@ func (ls *listCommand) handleShowDetailsAndReturn(uuid string, servers *upcloud.
 	case "2":
 		// Return to server list
 		return ls.handleInteractiveMode(servers, exec)
-	case "3":
-		// Exit
-		return output.OnlyMarshaled{Value: "Interactive mode exited."}, nil
 	default:
 		// Invalid choice, return to server list
 		fmt.Printf("Invalid choice. Returning to server list.\n")
@@ -1229,7 +1298,6 @@ func (ls *listCommand) showActionMenu(server ServerItem, exec commands.Executor)
 		{Name: "Stop server", Command: "stop", Enabled: server.State == "started"},
 		{Name: "Delete server", Command: "delete", Enabled: server.State == "stopped"},
 		{Name: "Back to server list", Command: "back", Enabled: true},
-		{Name: "Exit", Command: "exit", Enabled: true},
 	}
 
 	// Filter enabled actions and display menu
@@ -1501,10 +1569,6 @@ func (ls *listCommand) executeAction(action ActionItem, server ServerItem, exec 
 			return nil, err
 		}
 		return ls.handleInteractiveMode(servers, exec)
-	case "exit":
-		// Exit cleanly
-		fmt.Printf("\nGoodbye!\n")
-		return output.OnlyMarshaled{Value: ""}, nil
 	default:
 		return nil, fmt.Errorf("unknown action: %s", action.Command)
 	}
