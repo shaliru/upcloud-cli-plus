@@ -5,15 +5,15 @@
 
 `upctl-plus` is an enhanced command-line interface to [UpCloud](https://upcloud.com/) services with interactive features. It provides all the functionality of the original UpCloud CLI plus interactive resource selection, visual management, and streamlined workflows.
 
-## ✨ What's New
+## What's New
 
-- **🖱️ Interactive Server Selection** - Navigate servers with arrow keys instead of copying UUIDs
-- **📊 Columnar Display** - Clean, aligned tables showing server info including public IP addresses
-- **⌨️ Keyboard Navigation** - Use arrow keys, search with `/`, and select with Enter
-- **🎯 Context-Aware Actions** - Action menus that adapt based on server state
-- **🔄 Backward Compatible** - All original `upctl` functionality preserved
+- **Interactive Server Selection** - Navigate servers with arrow keys instead of copying UUIDs
+- **Columnar Display** - Clean, aligned tables showing server info including public IP addresses
+- **Keyboard Navigation** - Use arrow keys, search with `/`, and select with Enter
+- **Context-Aware Actions** - Action menus that adapt based on server state
+- **Backward Compatible** - All original `upctl` functionality preserved
 
-## 🚀 Installation
+## Installation
 
 ### Option 1: Download and Build (Recommended)
 
@@ -35,7 +35,7 @@ make build
 go install github.com/shaliru/upcloud-cli-plus/cmd/upctl-plus@latest
 ```
 
-## ⚙️ Configuration
+## Configuration
 
 `upctl-plus` uses the same configuration as the original UpCloud CLI. If you already have `upctl` configured, `upctl-plus` will work immediately.
 
@@ -48,7 +48,7 @@ export UPCLOUD_PASSWORD="your-password"
 
 For detailed configuration options, see the [original UpCloud CLI documentation](https://upcloudltd.github.io/upcloud-cli/).
 
-## 🎮 Quick Start
+## Quick Start
 
 ### Interactive Mode
 ```bash

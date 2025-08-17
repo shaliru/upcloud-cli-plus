@@ -151,7 +151,7 @@ func SetDeprecationHelp(cmd *cobra.Command, deprecatedAliases []string) {
 	// Construct new alias list, excluding the deprecated aliases
 	var filteredAliases []string
 	for _, alias := range cmd.Aliases {
-		if !slices.Contains(deprecatedAliases, alias) { // ✅ Using slices.Contains
+		if !slices.Contains(deprecatedAliases, alias) { // Using slices.Contains
 			filteredAliases = append(filteredAliases, alias)
 		}
 	}

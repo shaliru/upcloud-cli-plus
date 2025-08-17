@@ -523,7 +523,7 @@ func (m *tuiModel) setupViewport(termWidth, termHeight int) {
 	}
 	
 	// Calculate space for fixed elements
-	headerHeight := 3  // "📊 Server Details: ..." + spacing
+	headerHeight := 3  // "Server Details: ..." + spacing
 	navigationHeight := len(m.detailsOptions) + 3  // Navigation options + spacing + help text
 	marginHeight := 2  // Top/bottom margins
 	
@@ -594,7 +594,7 @@ func (m tuiModel) renderServerDetails() string {
 	var b strings.Builder
 
 	// Header (fixed at top)
-	header := headerStyle.Render(fmt.Sprintf("📊 Server Details: %s", m.currentServer.Hostname))
+	header := headerStyle.Render(fmt.Sprintf("Server Details: %s", m.currentServer.Hostname))
 	b.WriteString(header)
 	b.WriteString("\n\n")
 
@@ -1086,7 +1086,7 @@ func (ls *listCommand) handleDeleteConfirmation(uuid string, exec commands.Execu
 	}
 
 	// Simple confirmation prompt
-	fmt.Printf("\n⚠️  WARNING: Are you sure you want to delete %s?\n", serverName)
+	fmt.Printf("\nWARNING: Are you sure you want to delete %s?\n", serverName)
 	fmt.Printf("This action cannot be undone. Type 'yes' to confirm: ")
 
 	reader := bufio.NewReader(os.Stdin)
@@ -1545,7 +1545,7 @@ func (ls *listCommand) executeAction(action ActionItem, server ServerItem, exec 
 		return stopCmd.Execute(exec, server.UUID)
 	case "delete":
 		// Confirm deletion
-		fmt.Printf("\n⚠️  WARNING: Are you sure you want to delete %s?\n", server.Hostname)
+		fmt.Printf("\nWARNING: Are you sure you want to delete %s?\n", server.Hostname)
 		fmt.Printf("This action cannot be undone. Type 'yes' to confirm: ")
 
 		reader := bufio.NewReader(os.Stdin)
