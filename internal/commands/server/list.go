@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/UpCloudLtd/upcloud-cli/v3/internal/commands"
 	"github.com/UpCloudLtd/upcloud-cli/v3/internal/commands/network"
@@ -439,11 +440,16 @@ func (ls *listCommand) handleInteractiveMode(servers *upcloud.Servers, exec comm
 		listCmd:  ls,
 	}
 
-	p := tea.NewProgram(model)
+	p := tea.NewProgram(model, tea.WithInput(os.Stdin), tea.WithOutput(os.Stderr), tea.WithoutCatchPanics())
 	finalModel, err := p.Run()
 	if err != nil {
 		return nil, fmt.Errorf("TUI error: %w", err)
 	}
+
+	// Clean up terminal state after TUI exits - restore cursor and clear any remaining artifacts
+	fmt.Fprint(os.Stderr, "\033[?25h") // Show cursor
+	fmt.Fprint(os.Stderr, "\033[0m")   // Reset all attributes
+	fmt.Fprint(os.Stderr, "\033[K")    // Clear to end of line
 
 	m := finalModel.(tuiModel)
 	if m.err != nil {
@@ -544,6 +550,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.view = serverSelectionView
 		m.selected = 0
 		return m, nil
+	case string:
+		if msg == "refresh_servers" {
+			// Timer expired, refresh the server list
+			m.loadingMsg = "Refreshing server list..."
+			m.view = loadingView
+			return m, m.loadServerListCmd()
+		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
@@ -588,6 +601,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "end":
 			if m.view == serverDetailsView {
 				m.viewport.GotoBottom()
+			}
+		case "r":
+			if m.view == serverSelectionView {
+				// Manual refresh of server list
+				m.loadingMsg = "Refreshing server list..."
+				m.view = loadingView
+				return m, m.loadServerListCmd()
 			}
 		case "enter":
 			switch m.view {
@@ -648,7 +668,7 @@ func (m *tuiModel) setupViewport(termWidth, termHeight int) {
 
 func (m tuiModel) View() string {
 	if m.quitting {
-		return ""
+		return "" // Return empty to avoid any final render
 	}
 
 	switch m.view {
@@ -836,7 +856,7 @@ func (m tuiModel) renderServerSelection() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("↑/↓: navigate • enter: select • q/ctrl+c: quit"))
+	b.WriteString(helpStyle.Render("↑/↓: navigate • enter: select • r: refresh • q/ctrl+c: quit"))
 	return b.String()
 }
 
@@ -1193,43 +1213,56 @@ func (m tuiModel) executeServerAction(action string) (tea.Model, tea.Cmd) {
 	// Perform the server action
 	switch action {
 	case "start":
-		startCmd := StartCommand().(*startCommand)
-		_, err := startCmd.Execute(m.exec, m.currentServer.UUID)
-		if err != nil {
-			m.err = err
-			m.quitting = true
-			return m, tea.Quit
-		}
-		// Update server state and refresh details
-		m.currentServer.State = "started"
-		m.loadingMsg = "Refreshing server details..."
+		// Start the server asynchronously (non-blocking) without progress output
+		go func() {
+			svc := m.exec.Server()
+			svc.StartServer(m.exec.Context(), &request.StartServerRequest{
+				UUID: m.currentServer.UUID,
+			})
+		}()
+
+		// Show temporary status message
+		m.loadingMsg = "Starting server..."
 		m.view = loadingView
-		return m, m.loadServerDetailsCmd()
+
+		// Set a timer to return to server list after 3 seconds
+		return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+			return "refresh_servers" // Custom message to trigger server list refresh
+		})
 	case "restart":
-		restartCmd := RestartCommand().(*restartCommand)
-		_, err := restartCmd.Execute(m.exec, m.currentServer.UUID)
-		if err != nil {
-			m.err = err
-			m.quitting = true
-			return m, tea.Quit
-		}
-		// Keep state as "started" after restart
-		m.loadingMsg = "Refreshing server details..."
+		// Restart the server asynchronously (non-blocking) without progress output
+		go func() {
+			svc := m.exec.Server()
+			svc.RestartServer(m.exec.Context(), &request.RestartServerRequest{
+				UUID: m.currentServer.UUID,
+			})
+		}()
+
+		// Show temporary status message
+		m.loadingMsg = "Restarting server..."
 		m.view = loadingView
-		return m, m.loadServerDetailsCmd()
+
+		// Set a timer to return to server list after 3 seconds
+		return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+			return "refresh_servers" // Custom message to trigger server list refresh
+		})
 	case "stop":
-		stopCmd := StopCommand().(*stopCommand)
-		_, err := stopCmd.Execute(m.exec, m.currentServer.UUID)
-		if err != nil {
-			m.err = err
-			m.quitting = true
-			return m, tea.Quit
-		}
-		// Update server state and refresh details
-		m.currentServer.State = "stopped"
-		m.loadingMsg = "Refreshing server details..."
+		// Stop the server asynchronously (non-blocking) without progress output
+		go func() {
+			svc := m.exec.Server()
+			svc.StopServer(m.exec.Context(), &request.StopServerRequest{
+				UUID: m.currentServer.UUID,
+			})
+		}()
+
+		// Show temporary status message
+		m.loadingMsg = "Stopping server..."
 		m.view = loadingView
-		return m, m.loadServerDetailsCmd()
+
+		// Set a timer to return to server list after 3 seconds
+		return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+			return "refresh_servers" // Custom message to trigger server list refresh
+		})
 	case "delete":
 		// For delete, we need to confirm and then exit to server list
 		deleteCmd := DeleteCommand().(*deleteCommand)
