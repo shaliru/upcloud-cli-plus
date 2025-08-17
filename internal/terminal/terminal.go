@@ -36,3 +36,23 @@ func GetTerminalWidth() int {
 	}
 	return w
 }
+
+// GetTerminalHeight tries to figure out the height of the terminal and returns it
+// returns 0 if there are problems in getting the height.
+func GetTerminalHeight() int {
+	_, h, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		return 0
+	}
+	return h
+}
+
+// GetTerminalSize returns both width and height of the terminal
+// returns 0, 0 if there are problems in getting the size.
+func GetTerminalSize() (int, int) {
+	w, h, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		return 0, 0
+	}
+	return w, h
+}
