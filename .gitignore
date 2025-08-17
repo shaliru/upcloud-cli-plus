@@ -46,3 +46,6 @@ dist/
 
 # Generated release notes
 .release_notes
+
+# Claude Code settings (keep local only)
+.claude/
