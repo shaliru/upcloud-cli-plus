@@ -50,6 +50,7 @@ type viewType int
 
 const (
 	serverSelectionView viewType = iota
+	loadingView
 	serverDetailsView
 )
 
@@ -76,6 +77,7 @@ type tuiModel struct {
 	quitting       bool
 	result         output.Output
 	err            error
+	loadingMsg     string
 }
 
 // ListCommand creates the "server list" command
@@ -448,6 +450,48 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Update viewport dimensions when window size changes
 			m.setupViewport(msg.Width, msg.Height)
 		}
+	case loadServerDetailsMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			m.quitting = true
+			return m, tea.Quit
+		}
+		
+		// Successfully loaded server details
+		m.serverDetails = msg.details
+		m.firewallRules = msg.firewallRules
+		
+		// Build navigation options including server actions
+		m.detailsOptions = []string{"Server overview"}
+		if msg.details.Firewall == "on" {
+			m.detailsOptions = append(m.detailsOptions, "Firewall rules")
+		}
+		
+		// Add server actions based on state
+		if m.currentServer.State == "stopped" {
+			m.detailsOptions = append(m.detailsOptions, "Start server")
+		}
+		if m.currentServer.State == "started" {
+			m.detailsOptions = append(m.detailsOptions, "Restart server")
+			m.detailsOptions = append(m.detailsOptions, "Stop server")
+		}
+		if m.currentServer.State == "stopped" {
+			m.detailsOptions = append(m.detailsOptions, "Delete server")
+		}
+		
+		// Always add back option
+		m.detailsOptions = append(m.detailsOptions, "Back to server list")
+		
+		// Set up viewport and show server overview by default
+		termWidth, termHeight := terminal.GetTerminalSize()
+		m.setupViewport(termWidth, termHeight)
+		m.currentContent = overviewContent
+		content := m.renderOverviewContent()
+		m.viewport.SetContent(content)
+		
+		m.view = serverDetailsView
+		m.selected = 0
+		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
@@ -497,13 +541,18 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch m.view {
 			case serverSelectionView:
 				m.currentServer = m.servers[m.selected]
-				return m.showServerDetails()
+				m.loadingMsg = "Loading server details..."
+				m.view = loadingView
+				return m, m.loadServerDetailsCmd()
 			case serverDetailsView:
 				// Handle details navigation options
 				return m.handleDetailsNavigation()
 			}
 		case "esc":
 			if m.view == serverDetailsView {
+				m.view = serverSelectionView
+				m.selected = 0
+			} else if m.view == loadingView {
 				m.view = serverSelectionView
 				m.selected = 0
 			}
@@ -552,6 +601,8 @@ func (m tuiModel) View() string {
 	switch m.view {
 	case serverSelectionView:
 		return m.renderServerSelection()
+	case loadingView:
+		return m.renderLoading()
 	case serverDetailsView:
 		return m.renderServerDetails()
 	default:
@@ -559,10 +610,60 @@ func (m tuiModel) View() string {
 	}
 }
 
+// loadServerDetailsMsg is a message that contains loaded server details
+type loadServerDetailsMsg struct {
+	details       *upcloud.ServerDetails
+	firewallRules *upcloud.FirewallRules
+	err           error
+}
+
+// loadServerDetailsCmd loads server details asynchronously
+func (m tuiModel) loadServerDetailsCmd() tea.Cmd {
+	return func() tea.Msg {
+		// Load server details
+		details, err := m.exec.All().GetServerDetails(m.exec.Context(), &request.GetServerDetailsRequest{UUID: m.currentServer.UUID})
+		if err != nil {
+			return loadServerDetailsMsg{err: err}
+		}
+		
+		// Load firewall rules if firewall is enabled
+		var fwRules *upcloud.FirewallRules
+		if details.Firewall == "on" {
+			rules, fwErr := m.exec.All().GetFirewallRules(m.exec.Context(), &request.GetFirewallRulesRequest{ServerUUID: m.currentServer.UUID})
+			if fwErr == nil {
+				fwRules = rules
+			}
+		}
+		
+		return loadServerDetailsMsg{
+			details:       details,
+			firewallRules: fwRules,
+			err:           nil,
+		}
+	}
+}
+
+func (m tuiModel) renderLoading() string {
+	var b strings.Builder
+	
+	// Header
+	b.WriteString(headerStyle.Render("UpCloud CLI Plus"))
+	b.WriteString("\n\n")
+	
+	// Loading message
+	b.WriteString(selectedStyle.Render(m.loadingMsg))
+	b.WriteString("\n\n")
+	
+	// Help text
+	b.WriteString(helpStyle.Render("Please wait..."))
+	
+	return b.String()
+}
+
 func (m tuiModel) renderServerSelection() string {
 	var b strings.Builder
 
-	b.WriteString(headerStyle.Render("🖥️  Server Selection"))
+	b.WriteString(headerStyle.Render("Server Selection"))
 	b.WriteString("\n\n")
 
 	// Header
@@ -952,7 +1053,9 @@ func (m tuiModel) executeServerAction(action string) (tea.Model, tea.Cmd) {
 		}
 		// Update server state and refresh details
 		m.currentServer.State = "started"
-		return m.showServerDetails()
+		m.loadingMsg = "Refreshing server details..."
+		m.view = loadingView
+		return m, m.loadServerDetailsCmd()
 	case "restart":
 		restartCmd := RestartCommand().(*restartCommand)
 		_, err := restartCmd.Execute(m.exec, m.currentServer.UUID)
@@ -962,7 +1065,9 @@ func (m tuiModel) executeServerAction(action string) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		// Keep state as "started" after restart
-		return m.showServerDetails()
+		m.loadingMsg = "Refreshing server details..."
+		m.view = loadingView
+		return m, m.loadServerDetailsCmd()
 	case "stop":
 		stopCmd := StopCommand().(*stopCommand)
 		_, err := stopCmd.Execute(m.exec, m.currentServer.UUID)
@@ -973,7 +1078,9 @@ func (m tuiModel) executeServerAction(action string) (tea.Model, tea.Cmd) {
 		}
 		// Update server state and refresh details
 		m.currentServer.State = "stopped"
-		return m.showServerDetails()
+		m.loadingMsg = "Refreshing server details..."
+		m.view = loadingView
+		return m, m.loadServerDetailsCmd()
 	case "delete":
 		// For delete, we need to confirm and then exit to server list
 		deleteCmd := DeleteCommand().(*deleteCommand)
@@ -992,56 +1099,6 @@ func (m tuiModel) executeServerAction(action string) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m tuiModel) showServerDetails() (tea.Model, tea.Cmd) {
-	// Load server details and firewall rules
-	details, err := m.exec.All().GetServerDetails(m.exec.Context(), &request.GetServerDetailsRequest{UUID: m.currentServer.UUID})
-	if err != nil {
-		m.err = err
-		m.quitting = true
-		return m, tea.Quit
-	}
-	m.serverDetails = details
-	
-	// Load firewall rules if firewall is enabled
-	if details.Firewall == "on" {
-		fwRules, fwErr := m.exec.All().GetFirewallRules(m.exec.Context(), &request.GetFirewallRulesRequest{ServerUUID: m.currentServer.UUID})
-		if fwErr == nil {
-			m.firewallRules = fwRules
-		}
-	}
-	
-	// Build navigation options including server actions
-	m.detailsOptions = []string{"Server overview"}
-	if details.Firewall == "on" {
-		m.detailsOptions = append(m.detailsOptions, "Firewall rules")
-	}
-	
-	// Add server actions based on state
-	if m.currentServer.State == "stopped" {
-		m.detailsOptions = append(m.detailsOptions, "Start server")
-	}
-	if m.currentServer.State == "started" {
-		m.detailsOptions = append(m.detailsOptions, "Restart server")
-		m.detailsOptions = append(m.detailsOptions, "Stop server")
-	}
-	if m.currentServer.State == "stopped" {
-		m.detailsOptions = append(m.detailsOptions, "Delete server")
-	}
-	
-	// Always add back option
-	m.detailsOptions = append(m.detailsOptions, "Back to server list")
-	
-	// Set up viewport and show server overview by default
-	termWidth, termHeight := terminal.GetTerminalSize()
-	m.setupViewport(termWidth, termHeight)
-	m.currentContent = overviewContent
-	content := m.renderOverviewContent()
-	m.viewport.SetContent(content)
-	
-	m.view = serverDetailsView
-	m.selected = 0
-	return m, nil
-}
 
 func (m tuiModel) getActionsForServer(server ServerItem) []ActionItem {
 	actions := []ActionItem{
