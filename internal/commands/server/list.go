@@ -108,11 +108,13 @@ const (
 type createWizardStep int
 
 const (
-	basicInfoStep createWizardStep = iota
+	hostnameStep createWizardStep = iota
+	zoneStep
 	planCategoryStep
 	planSelectionStep
 	osTemplateStep
-	authenticationStep
+	authMethodStep
+	authConfigStep
 	reviewStep
 )
 
@@ -401,6 +403,57 @@ func getServerPublicIP(uuid string, exec commands.Executor) string {
 	return "N/A"
 }
 
+// isPrivateIPv4 checks if an IP address is in a private range
+func isPrivateIPv4(ip string) bool {
+	// Check for private IP ranges: 10.x.x.x, 172.16-31.x.x, 192.168.x.x
+	if strings.HasPrefix(ip, "10.") {
+		return true
+	}
+	if strings.HasPrefix(ip, "192.168.") {
+		return true
+	}
+	// Check 172.16.x.x to 172.31.x.x range
+	if strings.HasPrefix(ip, "172.") {
+		parts := strings.Split(ip, ".")
+		if len(parts) >= 2 {
+			if parts[1] >= "16" && parts[1] <= "31" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// getPublicIPv4FromServer extracts the first public IPv4 address from server details
+func getPublicIPv4FromServer(server *upcloud.ServerDetails) string {
+	// First, check networking interfaces for public IPv4 addresses
+	for _, iface := range server.Networking.Interfaces {
+		if iface.Type == "public" {
+			for _, ipa := range iface.IPAddresses {
+				if ipa.Family == "IPv4" && !isPrivateIPv4(ipa.Address) {
+					return ipa.Address
+				}
+			}
+		}
+	}
+
+	// Check ip_addresses list for public IPs (skip private ranges)
+	for _, ipa := range server.IPAddresses {
+		if ipa.Family == "IPv4" && !isPrivateIPv4(ipa.Address) {
+			return ipa.Address
+		}
+	}
+
+	// Fallback: return any IPv4 address if no public IP found
+	for _, ipa := range server.IPAddresses {
+		if ipa.Family == "IPv4" {
+			return ipa.Address
+		}
+	}
+
+	return ""
+}
+
 // handleInteractiveMode provides an interactive server selection interface
 func (ls *listCommand) handleInteractiveMode(servers *upcloud.Servers, exec commands.Executor) (output.Output, error) {
 	if len(servers.Servers) == 0 {
@@ -631,12 +684,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.plansGrouped = groupPlans(msg.plans)
 
 		// Initialize wizard state
-		m.createStep = basicInfoStep
+		m.createStep = hostnameStep
 		m.createData = createWizardData{
-			hostname:       "",                                       // Empty to force user input
-			osTemplate:     "Ubuntu Server 24.04 LTS (Noble Numbat)", // Default
-			authMethod:     "ssh",                                    // Default
-			discoveredKeys: discoverSSHKeys(),                        // Auto-discover SSH keys
+			hostname:       "",                // Empty to force user input
+			osTemplate:     "",                // Empty to force user selection
+			authMethod:     "ssh",             // Default
+			discoveredKeys: discoverSSHKeys(), // Auto-discover SSH keys
 		}
 		m.createError = ""
 		m.selected = 0
@@ -651,12 +704,18 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Server created successfully!
+		publicIP := getPublicIPv4FromServer(msg.server)
+		if publicIP == "" {
+			publicIP = "Assigning IP address..."
+		}
+
 		m.result = output.MarshaledWithHumanDetails{
 			Value: msg.server,
 			Details: []output.DetailRow{
 				{Title: "UUID", Value: msg.server.UUID, Colour: ui.DefaultUUUIDColours},
 				{Title: "Hostname", Value: msg.server.Hostname},
-				{Title: "State", Value: msg.server.State},
+				{Title: "IPv4", Value: publicIP},
+				{Title: "Status", Value: "Server is being created and will start automatically"},
 			},
 		}
 		m.quitting = true
@@ -681,6 +740,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Cancel text input
 				if m.textInputField == "hostname" {
 					m.createData.hostname = "" // Reset to empty
+				} else if m.textInputField == "title" {
+					m.createData.title = "" // Reset to empty
 				}
 				m.textInputMode = false
 				m.textInputField = ""
@@ -689,14 +750,17 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Remove last character
 				if m.textInputField == "hostname" && len(m.createData.hostname) > 0 {
 					m.createData.hostname = m.createData.hostname[:len(m.createData.hostname)-1]
+				} else if m.textInputField == "title" && len(m.createData.title) > 0 {
+					m.createData.title = m.createData.title[:len(m.createData.title)-1]
 				}
 				return m, nil
 			default:
 				// Add character to text field
 				char := msg.String()
-				// Only accept valid hostname characters
 				if m.textInputField == "hostname" && len(char) == 1 && isValidHostnameChar(char) {
 					m.createData.hostname += char
+				} else if m.textInputField == "title" && len(char) == 1 && isValidTitleChar(char) {
+					m.createData.title += char
 				}
 				return m, nil
 			}
@@ -718,7 +782,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if m.view == createWizardView && !m.textInputMode {
 				// In create wizard, navigate options based on current step
-				if m.createStep == basicInfoStep {
+				if m.createStep == hostnameStep {
+					// Navigate between hostname (0) and title (1)
+					if m.selected > 0 {
+						m.selected--
+					}
+				} else if m.createStep == zoneStep {
+					// Navigate zones
 					if m.selected > 0 {
 						m.selected--
 					}
@@ -737,9 +807,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.selected--
 						m.updateOSScrollOffset()
 					}
-				} else if m.createStep == authenticationStep {
-					totalAuthOptions := m.getTotalAuthOptions()
-					if totalAuthOptions > 0 && m.selected > 0 {
+				} else if m.createStep == authMethodStep {
+					authOptions := getAuthenticationOptions(m.createData.osTemplate, m.templates)
+					if len(authOptions) > 0 && m.selected > 0 {
+						m.selected--
+					}
+				} else if m.createStep == authConfigStep {
+					// Navigate SSH key configuration options
+					if m.selected > 0 {
 						m.selected--
 					}
 				} else if m.createStep == reviewStep {
@@ -767,13 +842,18 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if m.view == createWizardView && !m.textInputMode {
 				// In create wizard, navigate options based on current step
-				if m.createStep == basicInfoStep {
-					// Allow selection of hostname (0) and zones (1+)
-					maxSelection := 0 // Start with just hostname field
-					if m.createData.hostname != "" && len(m.zones) > 0 {
-						maxSelection = len(m.zones) // Add zones if hostname is entered
+				if m.createStep == hostnameStep {
+					// Navigate between hostname (0), title (1), and continue (2)
+					maxSelection := 1 // hostname and title
+					if m.createData.hostname != "" {
+						maxSelection = 2 // add continue option when hostname is set
 					}
 					if m.selected < maxSelection {
+						m.selected++
+					}
+				} else if m.createStep == zoneStep {
+					// Navigate zones
+					if len(m.zones) > 0 && m.selected < len(m.zones)-1 {
 						m.selected++
 					}
 				} else if m.createStep == planCategoryStep {
@@ -792,9 +872,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.selected++
 						m.updateOSScrollOffset()
 					}
-				} else if m.createStep == authenticationStep {
-					totalAuthOptions := m.getTotalAuthOptions()
-					if totalAuthOptions > 0 && m.selected < totalAuthOptions-1 {
+				} else if m.createStep == authMethodStep {
+					authOptions := getAuthenticationOptions(m.createData.osTemplate, m.templates)
+					if len(authOptions) > 0 && m.selected < len(authOptions)-1 {
+						m.selected++
+					}
+				} else if m.createStep == authConfigStep {
+					// Navigate SSH key configuration options
+					totalSSHOptions := len(m.createData.discoveredKeys) + 2 // +2 for manual options
+					if m.selected < totalSSHOptions-1 {
 						m.selected++
 					}
 				} else if m.createStep == reviewStep {
@@ -835,17 +921,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.loadServerListCmd()
 			}
 		case " ": // spacebar
-			if m.view == createWizardView && m.createStep == authenticationStep {
-				// Toggle SSH key selection
-				authOptions := getAuthenticationOptions(m.createData.osTemplate)
-				if len(authOptions) > 0 {
-					// Calculate which SSH key is selected (if any)
-					keyIndex := m.selected - len(authOptions)
-					if keyIndex >= 0 && keyIndex < len(m.createData.discoveredKeys) {
-						// Toggle the SSH key
-						m.createData.discoveredKeys[keyIndex].Selected = !m.createData.discoveredKeys[keyIndex].Selected
-						m.createError = "" // Clear any error
-					}
+			if m.view == createWizardView && m.createStep == authConfigStep {
+				// Toggle SSH key selection in the configuration step
+				if m.selected >= 0 && m.selected < len(m.createData.discoveredKeys) {
+					// Toggle the SSH key
+					m.createData.discoveredKeys[m.selected].Selected = !m.createData.discoveredKeys[m.selected].Selected
+					m.createError = "" // Clear any error
 				}
 			}
 		case "enter":
@@ -903,8 +984,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == createWizardView && !m.textInputMode {
 				// Go to previous step in wizard
 				switch m.createStep {
+				case zoneStep:
+					m.createStep = hostnameStep
+					m.selected = 0
 				case planCategoryStep:
-					m.createStep = basicInfoStep
+					m.createStep = zoneStep
 					m.selected = 0
 				case planSelectionStep:
 					m.createStep = planCategoryStep
@@ -912,11 +996,19 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case osTemplateStep:
 					m.createStep = planSelectionStep
 					m.selected = 0
-				case authenticationStep:
+				case authMethodStep:
 					m.createStep = osTemplateStep
 					m.selected = 0
+				case authConfigStep:
+					m.createStep = authMethodStep
+					m.selected = 0
 				case reviewStep:
-					m.createStep = authenticationStep
+					// Check if we used password auth (which skips authConfigStep)
+					if m.createData.authMethod == "email" {
+						m.createStep = authMethodStep
+					} else {
+						m.createStep = authConfigStep
+					}
 					m.selected = 0
 				}
 				return m, nil
@@ -1280,7 +1372,7 @@ func (m tuiModel) renderCreateWizard() string {
 	var b strings.Builder
 
 	// Header with breadcrumb
-	stepNames := []string{"Basic Info", "Plan Category", "Plan Selection", "OS Template", "Authentication", "Review"}
+	stepNames := []string{"Hostname & Title", "Zone", "Plan Category", "Plan Selection", "OS Template", "Authentication Method", "SSH Configuration", "Review"}
 	breadcrumb := fmt.Sprintf("Server List > Create Server > Step %d: %s", int(m.createStep)+1, stepNames[m.createStep])
 	b.WriteString(headerStyle.Render(breadcrumb))
 	b.WriteString("\n\n")
@@ -1293,16 +1385,20 @@ func (m tuiModel) renderCreateWizard() string {
 
 	// Render current step
 	switch m.createStep {
-	case basicInfoStep:
-		b.WriteString(m.renderBasicInfoStep())
+	case hostnameStep:
+		b.WriteString(m.renderHostnameStep())
+	case zoneStep:
+		b.WriteString(m.renderZoneStep())
 	case planCategoryStep:
 		b.WriteString(m.renderPlanCategoryStep())
 	case planSelectionStep:
 		b.WriteString(m.renderPlanSelectionStep())
 	case osTemplateStep:
 		b.WriteString(m.renderOSTemplateStep())
-	case authenticationStep:
-		b.WriteString(m.renderAuthenticationStep())
+	case authMethodStep:
+		b.WriteString(m.renderAuthMethodStep())
+	case authConfigStep:
+		b.WriteString(m.renderAuthConfigStep())
 	case reviewStep:
 		b.WriteString(m.renderReviewStep())
 	}
@@ -1318,19 +1414,16 @@ func (m tuiModel) renderCreateWizard() string {
 	return b.String()
 }
 
-// renderBasicInfoStep renders the first step of the wizard
-func (m tuiModel) renderBasicInfoStep() string {
+// renderHostnameStep renders the hostname and title input step
+func (m tuiModel) renderHostnameStep() string {
 	var b strings.Builder
 
-	b.WriteString("Enter basic server information:\n\n")
+	b.WriteString("Enter server details:\n\n")
 
 	// Hostname field with text input support
 	if m.textInputMode && m.textInputField == "hostname" {
 		b.WriteString("Hostname: ")
 		hostnameDisplay := m.createData.hostname
-		if hostnameDisplay == "" {
-			hostnameDisplay = ""
-		}
 		b.WriteString(selectedStyle.Render(hostnameDisplay + "│")) // Show cursor
 		b.WriteString("\n")
 		b.WriteString(helpStyle.Render("Type hostname and press Enter to confirm, Esc to cancel"))
@@ -1338,7 +1431,7 @@ func (m tuiModel) renderBasicInfoStep() string {
 	} else {
 		hostnameDisplay := m.createData.hostname
 		if hostnameDisplay == "" {
-			hostnameDisplay = "[Press Enter to enter hostname]"
+			hostnameDisplay = "[Enter to edit]"
 		}
 		if m.selected == 0 { // Hostname field selected
 			b.WriteString(fmt.Sprintf("Hostname: %s\n", selectedStyle.Render("> "+hostnameDisplay)))
@@ -1347,31 +1440,78 @@ func (m tuiModel) renderBasicInfoStep() string {
 		}
 	}
 
-	// Title field (optional)
-	titleDisplay := m.createData.title
-	if titleDisplay == "" {
-		titleDisplay = "[auto-generated from hostname]"
-	}
-	b.WriteString(fmt.Sprintf("Title: %s\n", normalStyle.Render("  "+titleDisplay)))
-
-	// Zone selection (only if hostname is entered)
-	if m.createData.hostname != "" && !m.textInputMode {
-		b.WriteString("\nSelect Zone:\n")
-		if len(m.zones) == 0 {
-			b.WriteString("Loading zones...")
-		} else {
-			for i, zone := range m.zones {
-				// Offset selection by 1 to account for hostname field
-				if i == m.selected-1 && m.selected > 0 {
-					b.WriteString(selectedStyle.Render("> " + zone.ID))
-				} else {
-					b.WriteString(normalStyle.Render("  " + zone.ID))
-				}
-				b.WriteString("\n")
+	// Title field with text input support
+	if m.textInputMode && m.textInputField == "title" {
+		b.WriteString("Title:    ")
+		titleDisplay := m.createData.title
+		b.WriteString(selectedStyle.Render(titleDisplay + "│")) // Show cursor
+		b.WriteString("\n")
+		b.WriteString(helpStyle.Render("Type title and press Enter to confirm, Esc to cancel"))
+		b.WriteString("\n")
+	} else {
+		titleDisplay := m.createData.title
+		if titleDisplay == "" {
+			if m.createData.hostname != "" {
+				titleDisplay = m.createData.hostname + " [Enter to edit]"
+			} else {
+				titleDisplay = "[Enter to edit]"
 			}
 		}
-	} else if m.createData.hostname == "" && !m.textInputMode {
-		b.WriteString("\n" + helpStyle.Render("Enter a hostname to continue"))
+		if m.selected == 1 { // Title field selected
+			b.WriteString(fmt.Sprintf("Title:    %s\n", selectedStyle.Render("> "+titleDisplay)))
+		} else {
+			b.WriteString(fmt.Sprintf("Title:    %s\n", normalStyle.Render("  "+titleDisplay)))
+		}
+	}
+
+	// Continue option (only show if hostname is entered)
+	if !m.textInputMode && m.createData.hostname != "" {
+		b.WriteString("\n")
+		if m.selected == 2 {
+			b.WriteString(selectedStyle.Render("> Continue to zone selection"))
+		} else {
+			b.WriteString(normalStyle.Render("  Continue to zone selection"))
+		}
+		b.WriteString("\n")
+	}
+
+	// Instructions
+	if !m.textInputMode {
+		if m.createData.hostname == "" {
+			b.WriteString("\n" + helpStyle.Render("Enter a hostname to continue"))
+		} else {
+			b.WriteString("\n" + helpStyle.Render("Select 'Continue' when ready, or edit title"))
+		}
+	}
+
+	return b.String()
+}
+
+// renderZoneStep renders the zone selection step
+func (m tuiModel) renderZoneStep() string {
+	var b strings.Builder
+
+	b.WriteString("Select a datacenter zone:\n\n")
+
+	// Show current selections for context
+	b.WriteString(fmt.Sprintf("Server: %s", m.createData.hostname))
+	if m.createData.title != "" && m.createData.title != m.createData.hostname {
+		b.WriteString(fmt.Sprintf(" (%s)", m.createData.title))
+	}
+	b.WriteString("\n\n")
+
+	// Zone list
+	if len(m.zones) == 0 {
+		b.WriteString("Loading zones...")
+	} else {
+		for i, zone := range m.zones {
+			if i == m.selected {
+				b.WriteString(selectedStyle.Render("> " + zone.ID))
+			} else {
+				b.WriteString(normalStyle.Render("  " + zone.ID))
+			}
+			b.WriteString("\n")
+		}
 	}
 
 	return b.String()
@@ -1454,19 +1594,14 @@ func (m tuiModel) renderOSTemplateStep() string {
 
 	b.WriteString("Select an operating system template:\n\n")
 
-	// Table header
-	b.WriteString(fmt.Sprintf("   %-50s %-12s %-8s %s\n",
-		"Template Name", "Size", "Access", "Type"))
-	b.WriteString("   " + strings.Repeat("─", 85) + "\n")
-
 	// Calculate terminal height for scrolling
 	termHeight := terminal.GetTerminalHeight()
 	if termHeight <= 0 {
 		termHeight = 24 // Default fallback
 	}
 
-	// Reserve space for header, breadcrumb, step title, table header, help text
-	availableLines := termHeight - 10
+	// Reserve space for header, breadcrumb, step title, help text
+	availableLines := termHeight - 8
 	if availableLines < 5 {
 		availableLines = 5
 	}
@@ -1482,25 +1617,10 @@ func (m tuiModel) renderOSTemplateStep() string {
 	for i := startIdx; i < endIdx; i++ {
 		template := m.templates[i]
 
-		// Truncate long template names
-		templateName := template.Title
-		if len(templateName) > 50 {
-			templateName = templateName[:47] + "..."
-		}
-
-		// Format size in GB
-		sizeGB := fmt.Sprintf("%d GB", template.Size)
-
-		templateLine := fmt.Sprintf("%-50s %-12s %-8s %s",
-			templateName,
-			sizeGB,
-			string(template.Access),
-			string(template.Type))
-
 		if i == m.selected {
-			b.WriteString(selectedStyle.Render("> " + templateLine))
+			b.WriteString(selectedStyle.Render("> " + template.Title))
 		} else {
-			b.WriteString(normalStyle.Render("  " + templateLine))
+			b.WriteString(normalStyle.Render("  " + template.Title))
 		}
 		b.WriteString("\n")
 	}
@@ -1736,15 +1856,144 @@ func (m tuiModel) renderWizardStatusBar() string {
 	// OS Template
 	if m.createData.osTemplate != "" {
 		// Shorten OS name for status bar
-		osShort := strings.ReplaceAll(m.createData.osTemplate, "Server ", "")
-		osShort = strings.ReplaceAll(osShort, " LTS", "")
-		osShort = strings.ReplaceAll(osShort, " (Noble Numbat)", "")
+		osShort := shortenOSName(m.createData.osTemplate)
 		parts = append(parts, osShort)
+	} else if m.createStep == osTemplateStep {
+		parts = append(parts, "[selecting OS...]")
 	} else {
-		parts = append(parts, "Ubuntu 24.04")
+		parts = append(parts, "[OS]")
 	}
 
 	return strings.Join(parts, " • ")
+}
+
+// shortenOSName creates a concise display name for OS templates
+func shortenOSName(fullName string) string {
+	// Handle Ubuntu variants
+	if strings.Contains(fullName, "Ubuntu") {
+		if strings.Contains(fullName, "24.04") {
+			return "Ubuntu 24.04"
+		}
+		if strings.Contains(fullName, "22.04") {
+			return "Ubuntu 22.04"
+		}
+		if strings.Contains(fullName, "20.04") {
+			return "Ubuntu 20.04"
+		}
+		// Handle other Ubuntu versions
+		if strings.Contains(fullName, "Ubuntu Server") {
+			// Extract version number if possible
+			parts := strings.Fields(fullName)
+			for i, part := range parts {
+				if part == "Server" && i+1 < len(parts) {
+					version := parts[i+1]
+					return "Ubuntu " + version
+				}
+			}
+		}
+		return "Ubuntu"
+	}
+
+	// Handle Debian variants
+	if strings.Contains(fullName, "Debian") {
+		if strings.Contains(fullName, "12") {
+			return "Debian 12"
+		}
+		if strings.Contains(fullName, "11") {
+			return "Debian 11"
+		}
+		if strings.Contains(fullName, "13") {
+			return "Debian 13"
+		}
+		return "Debian"
+	}
+
+	// Handle Windows variants
+	if strings.Contains(fullName, "Windows") {
+		if strings.Contains(fullName, "2022") {
+			if strings.Contains(fullName, "Datacenter") {
+				return "Windows 2022 DC"
+			}
+			return "Windows 2022"
+		}
+		if strings.Contains(fullName, "2019") {
+			if strings.Contains(fullName, "Datacenter") {
+				return "Windows 2019 DC"
+			}
+			return "Windows 2019"
+		}
+		if strings.Contains(fullName, "2016") {
+			if strings.Contains(fullName, "Datacenter") {
+				return "Windows 2016 DC"
+			}
+			return "Windows 2016"
+		}
+		return "Windows"
+	}
+
+	// Handle CentOS variants
+	if strings.Contains(fullName, "CentOS") {
+		if strings.Contains(fullName, "Stream 9") {
+			return "CentOS 9"
+		}
+		if strings.Contains(fullName, "Stream 10") {
+			return "CentOS 10"
+		}
+		return "CentOS"
+	}
+
+	// Handle AlmaLinux variants
+	if strings.Contains(fullName, "AlmaLinux") {
+		if strings.Contains(fullName, " 8") {
+			return "AlmaLinux 8"
+		}
+		if strings.Contains(fullName, " 9") {
+			return "AlmaLinux 9"
+		}
+		if strings.Contains(fullName, " 10") {
+			return "AlmaLinux 10"
+		}
+		return "AlmaLinux"
+	}
+
+	// Handle Rocky Linux variants
+	if strings.Contains(fullName, "Rocky") {
+		if strings.Contains(fullName, " 8") {
+			return "Rocky 8"
+		}
+		if strings.Contains(fullName, " 9") {
+			return "Rocky 9"
+		}
+		if strings.Contains(fullName, " 10") {
+			return "Rocky 10"
+		}
+		return "Rocky Linux"
+	}
+
+	// Handle Fedora variants
+	if strings.Contains(fullName, "Fedora") {
+		// Extract version number
+		parts := strings.Fields(fullName)
+		for i, part := range parts {
+			if part == "Fedora" && i+1 < len(parts) {
+				version := parts[i+1]
+				return "Fedora " + version
+			}
+		}
+		return "Fedora"
+	}
+
+	// For anything else, try to extract the first meaningful part
+	parts := strings.Fields(fullName)
+	if len(parts) > 0 {
+		// Return first 2 words max
+		if len(parts) >= 2 {
+			return parts[0] + " " + parts[1]
+		}
+		return parts[0]
+	}
+
+	return fullName
 }
 
 // formatTransfer converts GiB to TB for display
@@ -1829,6 +2078,17 @@ func isValidHostnameChar(char string) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-'
 }
 
+// isValidTitleChar checks if a character is valid for server titles
+func isValidTitleChar(char string) bool {
+	if len(char) != 1 {
+		return false
+	}
+	c := char[0]
+	// Allow alphanumeric, spaces, hyphens, underscores, and common punctuation
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+		c == ' ' || c == '-' || c == '_' || c == '.' || c == '(' || c == ')'
+}
+
 // getTotalPlanCount returns the total number of plans across all groups
 func (m tuiModel) getTotalPlanCount() int {
 	total := 0
@@ -1904,29 +2164,25 @@ func isValidSSHPublicKey(path string) bool {
 }
 
 // getAuthenticationOptions returns available auth methods based on selected OS
-func getAuthenticationOptions(osTemplate string) []string {
-	// OS templates that support password delivery
-	passwordSupportedOS := []string{
-		"Ubuntu Server 20.04 LTS (Focal Fossa)",
-		"Debian GNU/Linux 11 (Bullseye)",
-		"CentOS Stream 9",
-		"AlmaLinux 8",
-		"Rocky Linux 8",
-	}
-
-	options := []string{"SSH Keys"}
-
-	// Check if password delivery is supported
-	for _, supportedOS := range passwordSupportedOS {
-		if strings.Contains(osTemplate, supportedOS) {
-			options = append(options, "Email Delivery", "SMS Delivery")
-			break
+// supportsPasswordAuth checks if the selected OS template supports password authentication
+func supportsPasswordAuth(osTemplate string, templates []upcloud.Storage) bool {
+	// Find the selected template
+	for _, template := range templates {
+		if template.Title == osTemplate {
+			// Cloud-init templates only support SSH keys
+			return template.TemplateType != upcloud.StorageTemplateTypeCloudInit
 		}
 	}
+	// If template not found, default to SSH keys only for safety
+	return false
+}
 
-	// Windows servers support password delivery
-	if strings.Contains(strings.ToLower(osTemplate), "windows") {
-		options = append(options, "Email Delivery", "SMS Delivery")
+func getAuthenticationOptions(osTemplate string, templates []upcloud.Storage) []string {
+	options := []string{"SSH Keys"}
+
+	// Check if password delivery is supported based on template type
+	if supportsPasswordAuth(osTemplate, templates) {
+		options = append(options, "Password Authentication")
 	}
 
 	return options
@@ -1934,7 +2190,7 @@ func getAuthenticationOptions(osTemplate string) []string {
 
 // getTotalAuthOptions returns the total number of selectable items in auth step
 func (m tuiModel) getTotalAuthOptions() int {
-	authOptions := getAuthenticationOptions(m.createData.osTemplate)
+	authOptions := getAuthenticationOptions(m.createData.osTemplate, m.templates)
 	total := len(authOptions)
 
 	// If SSH Keys method is available (it's always the first option), add SSH key options
@@ -1948,14 +2204,102 @@ func (m tuiModel) getTotalAuthOptions() int {
 	return total
 }
 
-// renderAuthenticationStep renders the authentication step
+// renderAuthMethodStep renders the authentication method selection step
+func (m tuiModel) renderAuthMethodStep() string {
+	var b strings.Builder
+
+	b.WriteString("Choose authentication method:\n\n")
+
+	// Get available authentication options based on selected OS
+	authOptions := getAuthenticationOptions(m.createData.osTemplate, m.templates)
+
+	for i, option := range authOptions {
+		if i == m.selected {
+			b.WriteString(selectedStyle.Render("> " + option))
+		} else {
+			b.WriteString(normalStyle.Render("  " + option))
+		}
+		b.WriteString("\n")
+	}
+
+	// If password auth is not supported, show explanation
+	if !supportsPasswordAuth(m.createData.osTemplate, m.templates) {
+		osName := shortenOSName(m.createData.osTemplate)
+		b.WriteString("\n" + helpStyle.Render(fmt.Sprintf("Note: %s only supports SSH key authentication", osName)))
+	}
+
+	b.WriteString("\n" + helpStyle.Render("Select your preferred authentication method"))
+
+	return b.String()
+}
+
+// renderAuthConfigStep renders the SSH key configuration step
+func (m tuiModel) renderAuthConfigStep() string {
+	var b strings.Builder
+
+	b.WriteString("Configure SSH keys:\n\n")
+
+	currentIndex := 0
+
+	// Show discovered keys
+	if len(m.createData.discoveredKeys) > 0 {
+		b.WriteString("Discovered Keys:\n")
+		for _, key := range m.createData.discoveredKeys {
+			checkbox := "☐"
+			if key.Selected {
+				checkbox = "☑"
+			}
+
+			if currentIndex == m.selected {
+				b.WriteString(selectedStyle.Render(fmt.Sprintf("> %s %s (%s)", checkbox, key.Name, key.Path)))
+			} else {
+				b.WriteString(normalStyle.Render(fmt.Sprintf("  %s %s (%s)", checkbox, key.Name, key.Path)))
+			}
+			b.WriteString("\n")
+			currentIndex++
+		}
+		b.WriteString("\n")
+	}
+
+	// Show manual options
+	b.WriteString("Manual Options:\n")
+
+	// Paste SSH key option
+	if currentIndex == m.selected {
+		b.WriteString(selectedStyle.Render("> [ ] Paste SSH key content"))
+	} else {
+		b.WriteString(normalStyle.Render("  [ ] Paste SSH key content"))
+	}
+	b.WriteString("\n")
+	currentIndex++
+
+	// File path option
+	if currentIndex == m.selected {
+		b.WriteString(selectedStyle.Render("> [ ] Specify file path"))
+	} else {
+		b.WriteString(normalStyle.Render("  [ ] Specify file path"))
+	}
+	b.WriteString("\n")
+
+	// Show error message if validation failed
+	if m.createError != "" {
+		b.WriteString("\n" + ui.DefaultErrorColours.Sprint("⚠ "+m.createError))
+		b.WriteString("\n" + helpStyle.Render("Press 'space' to toggle • Enter to continue when ready"))
+	} else {
+		b.WriteString("\n" + helpStyle.Render("Press 'space' to toggle • Enter to continue when ready"))
+	}
+
+	return b.String()
+}
+
+// renderAuthenticationStep renders the authentication step (legacy - will be removed)
 func (m tuiModel) renderAuthenticationStep() string {
 	var b strings.Builder
 
 	b.WriteString("Configure authentication:\n\n")
 
 	// Get available authentication options based on selected OS
-	authOptions := getAuthenticationOptions(m.createData.osTemplate)
+	authOptions := getAuthenticationOptions(m.createData.osTemplate, m.templates)
 	currentIndex := 0
 
 	// Show authentication method selection
@@ -2063,9 +2407,20 @@ func (m tuiModel) renderReviewStep() string {
 
 	b.WriteString("\n")
 	if m.validateConfiguration() {
-		b.WriteString(selectedStyle.Render("> Create Server"))
+		// Option 0: Create Server
+		if m.selected == 0 {
+			b.WriteString(selectedStyle.Render("> Create Server"))
+		} else {
+			b.WriteString(normalStyle.Render("  Create Server"))
+		}
 		b.WriteString("\n")
-		b.WriteString(normalStyle.Render("  Back to previous step"))
+
+		// Option 1: Back to previous step
+		if m.selected == 1 {
+			b.WriteString(selectedStyle.Render("> Back to previous step"))
+		} else {
+			b.WriteString(normalStyle.Render("  Back to previous step"))
+		}
 	} else {
 		b.WriteString(ui.DefaultErrorColours.Sprint("⚠ Configuration incomplete"))
 		b.WriteString("\n")
@@ -2084,6 +2439,21 @@ func (m tuiModel) getDisplayTitle() string {
 		return m.createData.hostname
 	}
 	return "[Not set]"
+}
+
+// hasValidSSHAuthentication checks if SSH authentication is properly configured
+func (m tuiModel) hasValidSSHAuthentication() bool {
+	// Check if any discovered SSH keys are selected
+	for _, key := range m.createData.discoveredKeys {
+		if key.Selected {
+			return true
+		}
+	}
+
+	// TODO: Add checks for manual SSH key options (paste content, file path)
+	// For now, we only validate discovered keys
+
+	return false
 }
 
 // validateConfiguration checks if all required fields are set
@@ -2133,6 +2503,11 @@ func (m tuiModel) buildCreateServerRequest() (*request.CreateServerRequest, erro
 		return nil, fmt.Errorf("OS template not found: %w", err)
 	}
 
+	// Enable metadata service for cloud-init templates
+	if osTemplate.TemplateType == upcloud.StorageTemplateTypeCloudInit {
+		req.Metadata = upcloud.True
+	}
+
 	// Get plan details for storage size
 	selectedPlan := m.getSelectedPlan()
 	if selectedPlan == nil {
@@ -2144,7 +2519,7 @@ func (m tuiModel) buildCreateServerRequest() (*request.CreateServerRequest, erro
 		Action:  "clone",
 		Address: "virtio",
 		Storage: osTemplate.UUID,
-		Title:   fmt.Sprintf("%s-OS", m.createData.hostname),
+		Title:   fmt.Sprintf("%s Device 1", m.createData.hostname),
 		Size:    selectedPlan.StorageSize,
 		Type:    upcloud.StorageTypeDisk,
 	})
@@ -2538,15 +2913,31 @@ func (m tuiModel) handleDetailsNavigation() (tea.Model, tea.Cmd) {
 
 func (m tuiModel) handleWizardNavigation() (tea.Model, tea.Cmd) {
 	switch m.createStep {
-	case basicInfoStep:
-		if m.selected == 0 && m.createData.hostname == "" {
+	case hostnameStep:
+		if m.selected == 0 {
 			// Enter text input mode for hostname
 			m.textInputMode = true
 			m.textInputField = "hostname"
 			return m, nil
-		} else if m.createData.hostname != "" && m.selected > 0 && len(m.zones) > 0 && m.selected-1 < len(m.zones) {
-			// Zone selected (offset by 1 due to hostname field)
-			m.createData.zone = m.zones[m.selected-1].ID
+		} else if m.selected == 1 {
+			// Enter text input mode for title
+			m.textInputMode = true
+			m.textInputField = "title"
+			return m, nil
+		} else if m.selected == 2 && m.createData.hostname != "" {
+			// Continue to zone selection
+			// Auto-generate title if empty
+			if m.createData.title == "" {
+				m.createData.title = m.createData.hostname
+			}
+			m.createStep = zoneStep
+			m.selected = 0
+		}
+		return m, nil
+	case zoneStep:
+		// Zone selected
+		if len(m.zones) > 0 && m.selected < len(m.zones) {
+			m.createData.zone = m.zones[m.selected].ID
 			// Move to plan category step
 			m.createStep = planCategoryStep
 			m.selected = 0
@@ -2577,27 +2968,45 @@ func (m tuiModel) handleWizardNavigation() (tea.Model, tea.Cmd) {
 		if m.selected < len(m.templates) {
 			selectedTemplate := m.templates[m.selected]
 			m.createData.osTemplate = selectedTemplate.Title
-			// Move to authentication step
-			m.createStep = authenticationStep
+			// Move to authentication method step
+			m.createStep = authMethodStep
 			m.selected = 0
 		}
 		return m, nil
-	case authenticationStep:
-		// In authentication step, handle auth method selection
-		authOptions := getAuthenticationOptions(m.createData.osTemplate)
+	case authMethodStep:
+		// Handle authentication method selection
+		authOptions := getAuthenticationOptions(m.createData.osTemplate, m.templates)
 		if len(authOptions) > 0 && m.selected < len(authOptions) {
 			selectedAuth := authOptions[m.selected]
 			switch selectedAuth {
 			case "SSH Keys":
 				m.createData.authMethod = "ssh"
-			case "Email Delivery":
-				m.createData.authMethod = "email"
-				m.createData.passwordDelivery = "email"
-			case "SMS Delivery":
-				m.createData.authMethod = "sms"
-				m.createData.passwordDelivery = "sms"
+				// Move to SSH configuration step
+				m.createStep = authConfigStep
+				m.selected = 0
+			case "Password Authentication":
+				// Only allow if template supports it
+				if supportsPasswordAuth(m.createData.osTemplate, m.templates) {
+					m.createData.authMethod = "email"
+					m.createData.passwordDelivery = "email"
+					// Skip configuration step, go directly to review
+					m.createStep = reviewStep
+					m.selected = 0
+				}
 			}
-			// Move to review step
+		}
+		return m, nil
+	case authConfigStep:
+		// Handle SSH key configuration
+		if m.createData.authMethod == "ssh" {
+			// Check if at least one SSH key is selected or configured
+			if !m.hasValidSSHAuthentication() {
+				// Set error message and stay in current step
+				m.createError = "Please select at least one SSH key to continue"
+				return m, nil
+			}
+			// Clear any previous error and move to review step
+			m.createError = ""
 			m.createStep = reviewStep
 			m.selected = 0
 		}
@@ -2611,7 +3020,12 @@ func (m tuiModel) handleWizardNavigation() (tea.Model, tea.Cmd) {
 			return m, m.createServerCmd()
 		} else if m.selected == 1 {
 			// Back to previous step
-			m.createStep = authenticationStep
+			// Check if we used password auth (which skips authConfigStep)
+			if m.createData.authMethod == "email" {
+				m.createStep = authMethodStep
+			} else {
+				m.createStep = authConfigStep
+			}
 			m.selected = 0
 		}
 		return m, nil

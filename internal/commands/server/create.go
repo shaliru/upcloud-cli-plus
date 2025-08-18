@@ -106,7 +106,7 @@ func (s *createParams) processParams(exec commands.Executor) error {
 			Action:  "clone",
 			Address: "virtio",
 			Storage: osStorage.UUID,
-			Title:   fmt.Sprintf("%s-OS", ui.TruncateText(s.Hostname, 64-7)),
+			Title:   fmt.Sprintf("%s Device 1", ui.TruncateText(s.Hostname, 64-9)),
 			Size:    size,
 			Type:    upcloud.StorageTypeDisk,
 		})
