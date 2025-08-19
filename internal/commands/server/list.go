@@ -526,7 +526,7 @@ func (ls *listCommand) handleInteractiveMode(servers *upcloud.Servers, exec comm
 		listCmd:  ls,
 	}
 
-	p := tea.NewProgram(model, tea.WithInput(os.Stdin), tea.WithOutput(os.Stderr), tea.WithoutCatchPanics())
+	p := tea.NewProgram(model, tea.WithInput(os.Stdin), tea.WithOutput(os.Stderr), tea.WithoutCatchPanics(), tea.WithAltScreen())
 	finalModel, err := p.Run()
 	if err != nil {
 		return nil, fmt.Errorf("TUI error: %w", err)
@@ -637,7 +637,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.currentServer.State == "stopped" {
 			m.detailsOptions = append(m.detailsOptions, "Start server")
 		}
-		if m.currentServer.State == "started" {
+		if m.currentServer.State == "started" || m.currentServer.State == "maintenance" {
 			m.detailsOptions = append(m.detailsOptions, "Restart server")
 			m.detailsOptions = append(m.detailsOptions, "Stop server")
 		}
@@ -696,6 +696,47 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.view = createWizardView
 		return m, nil
+	case serverActionProgressMsg:
+		if msg.stage == 2 {
+			// Progressive refresh system
+			switch msg.attempt {
+			case 1:
+				// First attempt: Show progress message, then refresh after 4s (total 7s)
+				m.loadingMsg = msg.progressMsg
+				return m, tea.Tick(4*time.Second, func(time.Time) tea.Msg {
+					return serverActionRefreshMsg{
+						attempt:    1,
+						action:     msg.action,
+						serverName: msg.serverName,
+					}
+				})
+			case 2:
+				// Second attempt: "Still [action]ing...", then refresh after 5s (total 12s)
+				m.loadingMsg = getProgressMessage(msg.action, 2)
+				return m, tea.Tick(5*time.Second, func(time.Time) tea.Msg {
+					return serverActionRefreshMsg{
+						attempt:    2,
+						action:     msg.action,
+						serverName: msg.serverName,
+					}
+				})
+			case 3:
+				// Third attempt: "Taking longer than usual...", then refresh after 5s (total 17s)
+				m.loadingMsg = getProgressMessage(msg.action, 3)
+				return m, tea.Tick(5*time.Second, func(time.Time) tea.Msg {
+					return serverActionRefreshMsg{
+						attempt:    3,
+						action:     msg.action,
+						serverName: msg.serverName,
+					}
+				})
+			case 4:
+				// Timeout: Show manual refresh hint
+				m.loadingMsg = "Operation may still be in progress. Press 'r' to refresh manually."
+				return m, nil
+			}
+		}
+		return m, nil
 	case createServerMsg:
 		if msg.err != nil {
 			m.createError = "Server creation failed: " + msg.err.Error()
@@ -727,6 +768,51 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.view = loadingView
 			return m, m.loadServerListCmd()
 		}
+	case serverActionRefreshMsg:
+		// Progressive refresh: Load server list and check if state changed
+		return m, tea.Batch(
+			m.loadServerListCmd(),
+			tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
+				return serverActionCheckMsg{
+					attempt:    msg.attempt,
+					action:     msg.action,
+					serverName: msg.serverName,
+				}
+			}),
+		)
+	case serverActionCheckMsg:
+		// Check if server state has changed appropriately
+		server := m.findServerByName(msg.serverName)
+		if server != nil && m.hasServerStateChanged(server, msg.action) {
+			// Success! Server state changed as expected, return to server list
+			m.view = serverSelectionView
+			m.selected = 0
+			return m, nil
+		}
+
+		// State hasn't changed yet, continue to next attempt or timeout
+		nextAttempt := msg.attempt + 1
+		if nextAttempt > 3 {
+			// Max attempts reached, show timeout message
+			return m, tea.Cmd(func() tea.Msg {
+				return serverActionProgressMsg{
+					stage:      2,
+					attempt:    4, // Timeout
+					action:     msg.action,
+					serverName: msg.serverName,
+				}
+			})
+		}
+
+		// Continue to next attempt
+		return m, tea.Cmd(func() tea.Msg {
+			return serverActionProgressMsg{
+				stage:      2,
+				attempt:    nextAttempt,
+				action:     msg.action,
+				serverName: msg.serverName,
+			}
+		})
 	case tea.KeyMsg:
 		// Handle text input mode first
 		if m.textInputMode {
@@ -3035,63 +3121,39 @@ func (m tuiModel) handleWizardNavigation() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) executeServerAction(action string) (tea.Model, tea.Cmd) {
-	// Perform the server action
+	// Perform the server action using direct API calls to avoid progress messages
+	svc := m.exec.Server()
+	var err error
+
 	switch action {
 	case "start":
-		// Start the server asynchronously (non-blocking) without progress output
+		// StartServer API is synchronous (unlike restart/stop), so run it asynchronously
 		go func() {
-			svc := m.exec.Server()
 			svc.StartServer(m.exec.Context(), &request.StartServerRequest{
-				UUID: m.currentServer.UUID,
+				UUID:      m.currentServer.UUID,
+				AvoidHost: 0, // Default value
+				Host:      0, // Default value
 			})
+			// Note: Ignoring error for now to match restart/stop behavior
 		}()
-
-		// Show temporary status message
-		m.loadingMsg = "Starting server..."
-		m.view = loadingView
-
-		// Set a timer to return to server list after 3 seconds
-		return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
-			return "refresh_servers" // Custom message to trigger server list refresh
-		})
+		// Continue immediately to show user feedback
+		err = nil
 	case "restart":
-		// Restart the server asynchronously (non-blocking) without progress output
-		go func() {
-			svc := m.exec.Server()
-			svc.RestartServer(m.exec.Context(), &request.RestartServerRequest{
-				UUID: m.currentServer.UUID,
-			})
-		}()
-
-		// Show temporary status message
-		m.loadingMsg = "Restarting server..."
-		m.view = loadingView
-
-		// Set a timer to return to server list after 3 seconds
-		return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
-			return "refresh_servers" // Custom message to trigger server list refresh
+		_, err = svc.RestartServer(m.exec.Context(), &request.RestartServerRequest{
+			UUID:          m.currentServer.UUID,
+			StopType:      defaultStopType,
+			Timeout:       defaultRestartTimeout,
+			TimeoutAction: defaultRestartTimeoutAction,
 		})
 	case "stop":
-		// Stop the server asynchronously (non-blocking) without progress output
-		go func() {
-			svc := m.exec.Server()
-			svc.StopServer(m.exec.Context(), &request.StopServerRequest{
-				UUID: m.currentServer.UUID,
-			})
-		}()
-
-		// Show temporary status message
-		m.loadingMsg = "Stopping server..."
-		m.view = loadingView
-
-		// Set a timer to return to server list after 3 seconds
-		return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
-			return "refresh_servers" // Custom message to trigger server list refresh
+		_, err = svc.StopServer(m.exec.Context(), &request.StopServerRequest{
+			UUID:     m.currentServer.UUID,
+			StopType: defaultStopType,
 		})
 	case "delete":
-		// For delete, we need to confirm and then exit to server list
+		// For delete, we still use the command since it has confirmation logic
 		deleteCmd := DeleteCommand().(*deleteCommand)
-		_, err := deleteCmd.Execute(m.exec, m.currentServer.UUID)
+		_, err = deleteCmd.Execute(m.exec, m.currentServer.UUID)
 		if err != nil {
 			m.err = err
 			m.quitting = true
@@ -3104,14 +3166,48 @@ func (m tuiModel) executeServerAction(action string) (tea.Model, tea.Cmd) {
 	default:
 		return m, nil
 	}
+
+	// Handle errors from API calls
+	if err != nil {
+		m.err = err
+		m.quitting = true
+		return m, tea.Quit
+	}
+
+	// Show progressive status updates for better UX
+	var actionMsg, progressMsg string
+	switch action {
+	case "start":
+		actionMsg = fmt.Sprintf("✓ Start initiated for %s", m.currentServer.Hostname)
+		progressMsg = "Server starting..."
+	case "restart":
+		actionMsg = fmt.Sprintf("✓ Restart initiated for %s", m.currentServer.Hostname)
+		progressMsg = "Server restarting..."
+	case "stop":
+		actionMsg = fmt.Sprintf("✓ Stop initiated for %s", m.currentServer.Hostname)
+		progressMsg = "Server stopping..."
+	}
+
+	// Stage 1: Show immediate confirmation (3 seconds)
+	m.loadingMsg = actionMsg
+	m.view = loadingView
+	return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+		return serverActionProgressMsg{
+			stage:       2,
+			attempt:     1,
+			action:      action,
+			serverName:  m.currentServer.Hostname,
+			progressMsg: progressMsg,
+		}
+	})
 }
 
 func (m tuiModel) getActionsForServer(server ServerItem) []ActionItem {
 	actions := []ActionItem{
 		{Name: "Show details", Command: "show", Enabled: true},
 		{Name: "Start server", Command: "start", Enabled: server.State == "stopped"},
-		{Name: "Restart server", Command: "restart", Enabled: server.State == "started"},
-		{Name: "Stop server", Command: "stop", Enabled: server.State == "started"},
+		{Name: "Restart server", Command: "restart", Enabled: server.State == "started" || server.State == "maintenance"},
+		{Name: "Stop server", Command: "stop", Enabled: server.State == "started" || server.State == "maintenance"},
 		{Name: "Delete server", Command: "delete", Enabled: server.State == "stopped"},
 		{Name: "Back to server list", Command: "back", Enabled: true},
 	}
@@ -3607,8 +3703,8 @@ func (ls *listCommand) showActionMenu(server ServerItem, exec commands.Executor)
 	actions := []ActionItem{
 		{Name: "Show details", Command: "show", Enabled: true},
 		{Name: "Start server", Command: "start", Enabled: server.State == "stopped"},
-		{Name: "Restart server", Command: "restart", Enabled: server.State == "started"},
-		{Name: "Stop server", Command: "stop", Enabled: server.State == "started"},
+		{Name: "Restart server", Command: "restart", Enabled: server.State == "started" || server.State == "maintenance"},
+		{Name: "Stop server", Command: "stop", Enabled: server.State == "started" || server.State == "maintenance"},
 		{Name: "Delete server", Command: "delete", Enabled: server.State == "stopped"},
 		{Name: "Back to server list", Command: "back", Enabled: true},
 	}
@@ -3674,6 +3770,76 @@ type loadCreateWizardDataMsg struct {
 type createServerMsg struct {
 	server *upcloud.ServerDetails
 	err    error
+}
+
+// serverActionProgressMsg is a message for progressive server action updates
+type serverActionProgressMsg struct {
+	stage       int
+	attempt     int    // Which refresh attempt (1, 2, 3, 4=timeout)
+	action      string // "start", "restart", "stop"
+	serverName  string // Server hostname for messages
+	progressMsg string
+}
+
+// serverActionRefreshMsg is a message to trigger server list refresh and check status
+type serverActionRefreshMsg struct {
+	attempt    int
+	action     string
+	serverName string
+}
+
+// serverActionCheckMsg is a message to check if server state has changed after refresh
+type serverActionCheckMsg struct {
+	attempt    int
+	action     string
+	serverName string
+}
+
+// findServerByName finds a server in the current list by hostname
+func (m tuiModel) findServerByName(hostname string) *ServerItem {
+	for i := range m.servers {
+		if m.servers[i].Hostname == hostname {
+			return &m.servers[i]
+		}
+	}
+	return nil
+}
+
+// hasServerStateChanged checks if server state has changed appropriately for the action
+func (m tuiModel) hasServerStateChanged(server *ServerItem, action string) bool {
+	switch action {
+	case "start":
+		// For start action, we expect server to be "maintenance" (stopped -> maintenance -> started)
+		// Only "maintenance" indicates the start is actually happening
+		return server.State == "maintenance"
+	case "stop":
+		// For stop action, we expect server to be "maintenance" (started -> maintenance -> stopped)
+		// Only "maintenance" indicates the stop is actually happening
+		return server.State == "maintenance"
+	case "restart":
+		// For restart action, we expect server to be "maintenance" (started -> maintenance -> started)
+		// Only "maintenance" indicates the restart is actually happening
+		return server.State == "maintenance"
+	}
+	return false
+}
+
+// getProgressMessage returns the appropriate message for each attempt
+func getProgressMessage(action string, attempt int) string {
+	switch attempt {
+	case 2:
+		switch action {
+		case "start":
+			return "Still starting..."
+		case "restart":
+			return "Still restarting..."
+		case "stop":
+			return "Still stopping..."
+		}
+	case 3:
+		return "Taking longer than usual..."
+	}
+	return ""
 }
 
 // createBoxedTable creates a table with a nice boxed style and responsive width
