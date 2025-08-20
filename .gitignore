@@ -4,8 +4,8 @@
 *.dll
 *.so
 *.dylib
-upctl
-upctl-plus
+/upctl
+/upctl-plus
 bin/
 
 # Config files
