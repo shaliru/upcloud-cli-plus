@@ -54,7 +54,8 @@ func Load(path string) (Credentials, error) {
 		path = DefaultConfigPath()
 	}
 	data, err := os.ReadFile(path)
-	if err == nil {
+	switch {
+	case err == nil:
 		var fileCreds Credentials
 		if err := yaml.Unmarshal(data, &fileCreds); err != nil {
 			return Credentials{}, err
@@ -68,6 +69,11 @@ func Load(path string) (Credentials, error) {
 		if creds.Password == "" {
 			creds.Password = fileCreds.Password
 		}
+	case !errors.Is(err, os.ErrNotExist):
+		// A missing config file is fine (fall through to the credential check),
+		// but a real I/O error (permissions, etc.) must not masquerade as
+		// "no credentials".
+		return Credentials{}, err
 	}
 
 	if !creds.valid() {

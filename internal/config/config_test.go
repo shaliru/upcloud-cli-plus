@@ -53,3 +53,15 @@ func TestLoad_MissingCredentials(t *testing.T) {
 	_, err := Load(filepath.Join(t.TempDir(), "nonexistent.yaml"))
 	assert.ErrorIs(t, err, ErrNoCredentials)
 }
+
+func TestLoad_FileReadErrorIsReported(t *testing.T) {
+	t.Setenv("UPCLOUD_TOKEN", "")
+	t.Setenv("UPCLOUD_USERNAME", "")
+	t.Setenv("UPCLOUD_PASSWORD", "")
+
+	// A path that exists but cannot be read as a file (it's a directory) yields a
+	// real I/O error, which must surface rather than masquerade as ErrNoCredentials.
+	_, err := Load(t.TempDir())
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrNoCredentials)
+}
