@@ -1,12 +1,7 @@
 package main
 
-import (
-	"os"
-
-	"github.com/UpCloudLtd/upcloud-cli/v3/internal/core"
-)
+import "fmt"
 
 func main() {
-	exitCode := core.Execute()
-	os.Exit(exitCode)
+	fmt.Println("upctl-plus")
 }
