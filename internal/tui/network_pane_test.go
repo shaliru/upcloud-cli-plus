@@ -12,7 +12,8 @@ import (
 func TestNetworkRows(t *testing.T) {
 	rows := networkRows([]upcloud.Network{{UUID: "n1", Name: "net-a", Type: "private", Zone: "sg-sin1"}})
 	require.Len(t, rows, 1)
-	assert.Equal(t, "net-a", rows[0][0])
+	assert.Equal(t, "n1", rows[0][0], "UUID is first column")
+	assert.Equal(t, "net-a", rows[0][1])
 }
 
 func TestRenderNetworkDetail(t *testing.T) {
@@ -45,7 +46,6 @@ func mixedFakeNetworks() []upcloud.Network {
 
 func TestNetworkPane_DefaultsToPrivateAndToggles(t *testing.T) {
 	p := newNetworkPane()
-	p.setSize(120, 20)
 	p.setItems(mixedFakeNetworks())
 
 	item, ok := p.selectedItem()
@@ -65,4 +65,11 @@ func TestNetworkPane_IndicatorMentionsMode(t *testing.T) {
 	assert.Contains(t, p.indicator(), "private")
 	p.toggleAll()
 	assert.Contains(t, p.indicator(), "all")
+}
+
+func TestNetworkPane_ListViewAndDetailView(t *testing.T) {
+	p := newNetworkPane()
+	p.setItems(mixedFakeNetworks())
+	assert.NotEmpty(t, p.listView())
+	assert.NotPanics(t, func() { _ = p.detailView() })
 }

@@ -10,8 +10,6 @@ import (
 	"github.com/shaliru/upcloud-cli-plus/internal/tui/styles"
 )
 
-const networkListWidth = 52 // NAME+TYPE+ZONE + cell padding
-
 // networkPane is a read-only list + detail pane for networks. Detail renders
 // directly from the loaded list item (GetNetworks already returns full objects).
 type networkPane struct {
@@ -20,12 +18,11 @@ type networkPane struct {
 	all     []upcloud.Network
 	showAll bool
 	loaded  bool
-	width   int
-	height  int
 }
 
 func networkColumns() []table.Column {
 	return []table.Column{
+		{Title: "UUID", Width: 36},
 		{Title: "NAME", Width: 24},
 		{Title: "TYPE", Width: 10},
 		{Title: "ZONE", Width: 10},
@@ -35,7 +32,7 @@ func networkColumns() []table.Column {
 func networkRows(items []upcloud.Network) []table.Row {
 	rows := make([]table.Row, 0, len(items))
 	for _, n := range items {
-		rows = append(rows, table.Row{n.Name, n.Type, n.Zone})
+		rows = append(rows, table.Row{n.UUID, n.Name, n.Type, n.Zone})
 	}
 	return rows
 }
@@ -86,41 +83,14 @@ func (p *networkPane) selectedItem() (upcloud.Network, bool) {
 	return items[cur], true
 }
 
-// showSelectedDetail renders the highlighted network into the detail viewport.
-func (p *networkPane) showSelectedDetail() {
-	if n, ok := p.selectedItem(); ok {
-		p.detail.SetContent(renderNetworkDetail(&n, p.detailWidth()))
-		p.detail.GotoTop()
-	}
-}
-
-func (p *networkPane) setSize(w, h int) {
-	p.width, p.height = w, h
-	lw := networkListWidth
-	if lw > w {
-		lw = w
-	}
-	p.list.SetWidth(lw)
-	p.list.SetHeight(h)
-	p.detail.SetWidth(p.detailWidth())
-	p.detail.SetHeight(h)
-}
-
-func (p *networkPane) detailWidth() int {
-	w := p.width - networkListWidth - 1
-	if w < 1 {
-		return 1
-	}
-	return w
-}
-
-func (p *networkPane) view() string {
-	left := p.list.View()
+func (p *networkPane) listView() string {
 	if len(p.visible()) == 0 {
-		left = styles.Muted.Render("  (none)")
+		return styles.Muted.Render("  (none)")
 	}
-	return lipglossJoin(left, p.detail.View())
+	return p.list.View()
 }
+
+func (p *networkPane) detailView() string { return p.detail.View() }
 
 // renderNetworkDetail renders network details (read-only), width-bounded.
 func renderNetworkDetail(n *upcloud.Network, width int) string {

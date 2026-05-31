@@ -6,19 +6,10 @@ import (
 
 	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/viewport"
-	lipgloss "charm.land/lipgloss/v2"
 	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud"
 	"github.com/shaliru/upcloud-cli-plus/internal/cloud"
 	"github.com/shaliru/upcloud-cli-plus/internal/tui/styles"
 )
-
-const storageListWidth = 56 // TITLE+SIZE+ZONE+TIER+STATE + cell padding
-
-// lipglossJoin places two panes side by side (top-aligned). Defined here and
-// reused by the network pane and the App.
-func lipglossJoin(left, right string) string {
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
-}
 
 // storagePane is a read-only list + detail pane for storage. Detail is fetched
 // on enter (StorageDetails carries attached servers + backup info).
@@ -30,24 +21,24 @@ type storagePane struct {
 	customImages []upcloud.Storage
 	sub          int // 0 = devices, 1 = backups, 2 = custom images
 	loaded       bool
-	width        int
-	height       int
 }
 
 func storageColumns() []table.Column {
 	return []table.Column{
-		{Title: "TITLE", Width: 20},
+		{Title: "UUID", Width: 36},
+		{Title: "TITLE", Width: 24},
 		{Title: "SIZE (GB)", Width: 9},
 		{Title: "ZONE", Width: 9},
 		{Title: "TIER", Width: 8},
-		{Title: "STATE", Width: 8},
+		{Title: "TYPE", Width: 8},
+		{Title: "STATE", Width: 10},
 	}
 }
 
 func storageRows(items []upcloud.Storage) []table.Row {
 	rows := make([]table.Row, 0, len(items))
 	for _, s := range items {
-		rows = append(rows, table.Row{s.Title, fmt.Sprintf("%d", s.Size), s.Zone, s.Tier, s.State})
+		rows = append(rows, table.Row{s.UUID, s.Title, fmt.Sprintf("%d", s.Size), s.Zone, s.Tier, s.Type, dotState(s.State)})
 	}
 	return rows
 }
@@ -100,38 +91,14 @@ func (p *storagePane) selectedUUID() (string, bool) {
 	return items[cur].UUID, true
 }
 
-func (p *storagePane) setDetail(d *upcloud.StorageDetails) {
-	p.detail.SetContent(renderStorageDetail(d, p.detailWidth()))
-	p.detail.GotoTop()
-}
-
-func (p *storagePane) setSize(w, h int) {
-	p.width, p.height = w, h
-	lw := storageListWidth
-	if lw > w {
-		lw = w
-	}
-	p.list.SetWidth(lw)
-	p.list.SetHeight(h)
-	p.detail.SetWidth(p.detailWidth())
-	p.detail.SetHeight(h)
-}
-
-func (p *storagePane) detailWidth() int {
-	w := p.width - storageListWidth - 1
-	if w < 1 {
-		return 1
-	}
-	return w
-}
-
-func (p *storagePane) view() string {
-	left := p.list.View()
+func (p *storagePane) listView() string {
 	if len(p.active()) == 0 {
-		left = styles.Muted.Render("  (none)")
+		return styles.Muted.Render("  (none)")
 	}
-	return lipglossJoin(left, p.detail.View())
+	return p.list.View()
 }
+
+func (p *storagePane) detailView() string { return p.detail.View() }
 
 // renderStorageDetail renders storage details (read-only), width-bounded.
 func renderStorageDetail(d *upcloud.StorageDetails, width int) string {

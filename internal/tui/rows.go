@@ -5,38 +5,36 @@ import (
 	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud"
 )
 
-// serverColumns defines the list-pane columns. When showIP is true a PUBLIC IP
-// column is appended (omitted on narrow terminals to save horizontal space).
-func serverColumns(showIP bool) []table.Column {
-	cols := []table.Column{
+// serverColumns are the full-width server list columns (UUID-led, with PUBLIC IP).
+func serverColumns() []table.Column {
+	return []table.Column{
+		{Title: "UUID", Width: 36},
 		{Title: "HOSTNAME", Width: 22},
 		{Title: "PLAN", Width: 18},
 		{Title: "ZONE", Width: 10},
 		{Title: "STATE", Width: 10},
+		{Title: "PUBLIC IP", Width: 16},
 	}
-	if showIP {
-		cols = append(cols, table.Column{Title: "PUBLIC IP", Width: 16})
-	}
-	return cols
 }
 
-// serverRows converts servers into table rows. Column order matches
-// serverColumns(showIP). ipByUUID maps a server UUID to its public IPv4 (may be
-// empty); when showIP is true the column shows the IP or "—" if unknown.
-func serverRows(servers []upcloud.Server, ipByUUID map[string]string, showIP bool) []table.Row {
+func serverRows(servers []upcloud.Server, ipByUUID map[string]string) []table.Row {
 	rows := make([]table.Row, 0, len(servers))
 	for _, s := range servers {
-		row := table.Row{s.Hostname, s.Plan, s.Zone, s.State}
-		if showIP {
-			ip := ipByUUID[s.UUID]
-			if ip == "" {
-				ip = "—"
-			}
-			row = append(row, ip)
+		ip := ipByUUID[s.UUID]
+		if ip == "" {
+			ip = "—"
 		}
-		rows = append(rows, row)
+		rows = append(rows, table.Row{s.UUID, s.Hostname, s.Plan, s.Zone, dotState(s.State), ip})
 	}
 	return rows
+}
+
+// dotState prefixes a non-empty state with a ● dot for STATE columns.
+func dotState(s string) string {
+	if s == "" {
+		return ""
+	}
+	return "● " + s
 }
 
 // publicIPv4ByServer builds a server-UUID → public IPv4 map from a flat IP list.

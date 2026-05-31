@@ -6,21 +6,16 @@ import (
 	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud"
 )
 
-// serverPane holds the list (left) and detail viewport (right) for servers.
+// serverPane holds the list and detail viewport for servers.
 type serverPane struct {
 	list     table.Model
 	detail   viewport.Model
 	servers  []upcloud.Server
 	ipByUUID map[string]string
-	showIP   bool
 }
 
 func newServerPane() serverPane {
-	t := table.New(
-		table.WithColumns(serverColumns(false)),
-		table.WithFocused(true),
-		table.WithHeight(10),
-	)
+	t := table.New(table.WithColumns(serverColumns()), table.WithFocused(true), table.WithHeight(10))
 	return serverPane{list: t, detail: viewport.New()}
 }
 
@@ -34,21 +29,9 @@ func (p *serverPane) setIPs(ipByUUID map[string]string) {
 	p.rebuild()
 }
 
-// setShowIP toggles the PUBLIC IP column, rebuilding columns and rows if changed.
-func (p *serverPane) setShowIP(show bool) {
-	if show == p.showIP {
-		return
-	}
-	p.showIP = show
-	p.list.SetColumns(serverColumns(show))
-	p.rebuild()
-}
-
-// rebuild refreshes the table rows from the current servers, IP map and showIP.
+// rebuild refreshes the table rows from the current servers and IP map.
 func (p *serverPane) rebuild() {
-	p.list.SetRows(serverRows(p.servers, p.ipByUUID, p.showIP))
-	// table.SetRows clamps the cursor down but never back up, so an earlier
-	// SetRows on an empty table can leave it at -1; restore it when rows exist.
+	p.list.SetRows(serverRows(p.servers, p.ipByUUID))
 	if p.list.Cursor() < 0 && len(p.servers) > 0 {
 		p.list.SetCursor(0)
 	}
@@ -62,3 +45,6 @@ func (p *serverPane) selectedUUID() string {
 	}
 	return p.servers[cur].UUID
 }
+
+func (p *serverPane) listView() string   { return p.list.View() }
+func (p *serverPane) detailView() string { return p.detail.View() }

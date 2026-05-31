@@ -14,7 +14,8 @@ func TestStorageRows(t *testing.T) {
 		{UUID: "s1", Title: "disk-a", Size: 25, Zone: "sg-sin1", Tier: "maxiops", State: "online"},
 	})
 	require.Len(t, rows, 1)
-	assert.Equal(t, "disk-a", rows[0][0])
+	assert.Equal(t, "s1", rows[0][0], "UUID is first column")
+	assert.Equal(t, "disk-a", rows[0][1])
 }
 
 func TestRenderStorageDetail(t *testing.T) {
@@ -52,7 +53,6 @@ func categorizedFakeStorages() []upcloud.Storage {
 
 func TestStoragePane_PartitionsAndSwitches(t *testing.T) {
 	p := newStoragePane()
-	p.setSize(120, 20)
 	p.setItems(categorizedFakeStorages())
 
 	uuid, ok := p.selectedUUID()
@@ -80,4 +80,11 @@ func TestStoragePane_SubBarLabels(t *testing.T) {
 	assert.Contains(t, bar, "Devices")
 	assert.Contains(t, bar, "Backups")
 	assert.Contains(t, bar, "Custom images")
+}
+
+func TestStoragePane_ListViewAndDetailView(t *testing.T) {
+	p := newStoragePane()
+	p.setItems([]upcloud.Storage{{UUID: "s1", Title: "disk-a", Type: upcloud.StorageTypeNormal}})
+	assert.NotEmpty(t, p.listView())
+	assert.NotPanics(t, func() { _ = p.detailView() })
 }

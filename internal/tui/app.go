@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/viewport"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/shaliru/upcloud-cli-plus/internal/cloud"
 	"github.com/shaliru/upcloud-cli-plus/internal/tui/styles"
@@ -18,17 +20,16 @@ type App struct {
 	pane    serverPane
 	storage storagePane
 	network networkPane
-	active  int // 0 = servers, 1 = storage, 2 = networks
+	active  int  // 0 = servers, 1 = storage, 2 = networks
+	detail  bool // false = list mode, true = full-screen detail for the active tab
 	width   int
 	height  int
 	loading bool
-	status  string // transient, single-line hint/feedback
-	errText string // sticky full error, wrapped in the footer until acknowledged
-	pending string // action awaiting confirmation: "start"/"stop"/"restart"
+	status  string
+	errText string
+	pending string
 }
 
-// maxErrorLines caps the wrapped error footer so a pathologically long error
-// can't consume the whole screen. Typical API errors are 1–3 wrapped lines.
 const maxErrorLines = 8
 
 func NewWithService(svc cloud.Service) *App {
@@ -41,7 +42,6 @@ func NewWithService(svc cloud.Service) *App {
 	}
 }
 
-// setStartTab selects the initial tab from a resource name (e.g. "storage").
 func (a *App) setStartTab(resource string) {
 	switch resource {
 	case "storage":
@@ -67,8 +67,6 @@ func (a *App) loadServersCmd() tea.Cmd {
 	}
 }
 
-// loadIPsCmd fetches all IP addresses in one request; failures are silent (the
-// PUBLIC IP column simply stays unpopulated rather than erroring the dashboard).
 func (a *App) loadIPsCmd() tea.Cmd {
 	return func() tea.Msg {
 		ips, err := a.svc.ListIPAddresses(context.Background())
@@ -109,6 +107,16 @@ func (a *App) loadStorageDetailCmd(uuid string) tea.Cmd {
 	}
 }
 
+func (a *App) loadDetailCmd(uuid string) tea.Cmd {
+	return func() tea.Msg {
+		d, err := a.svc.GetServer(context.Background(), uuid)
+		if err != nil {
+			return errMsg{err: err}
+		}
+		return serverDetailMsg{detail: d}
+	}
+}
+
 func (a *App) actionCmd(action, uuid string) tea.Cmd {
 	return func() tea.Msg {
 		var err error
@@ -127,13 +135,26 @@ func (a *App) actionCmd(action, uuid string) tea.Cmd {
 	}
 }
 
-func (a *App) loadDetailCmd(uuid string) tea.Cmd {
-	return func() tea.Msg {
-		d, err := a.svc.GetServer(context.Background(), uuid)
-		if err != nil {
-			return errMsg{err: err}
-		}
-		return serverDetailMsg{detail: d}
+// activeList / activeDetail return pointers to the active tab's table / viewport.
+func (a *App) activeList() *table.Model {
+	switch a.active {
+	case 1:
+		return &a.storage.list
+	case 2:
+		return &a.network.list
+	default:
+		return &a.pane.list
+	}
+}
+
+func (a *App) activeDetail() *viewport.Model {
+	switch a.active {
+	case 1:
+		return &a.storage.detail
+	case 2:
+		return &a.network.detail
+	default:
+		return &a.pane.detail
 	}
 }
 
@@ -195,7 +216,12 @@ func (a *App) updateNetworks(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		a.network.toggleAll()
 		return a, nil
 	case "enter":
-		a.network.showSelectedDetail()
+		if n, ok := a.network.selectedItem(); ok {
+			a.network.detail.SetContent(renderNetworkDetail(&n, a.width))
+			a.network.detail.GotoTop()
+			a.detail = true
+			a.resize()
+		}
 		return a, nil
 	}
 	var cmd tea.Cmd
@@ -222,15 +248,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case serverDetailMsg:
-		a.pane.detail.SetContent(renderServerDetail(msg.detail, a.detailWidth()))
+		a.pane.detail.SetContent(renderServerDetail(msg.detail, a.width))
 		a.pane.detail.GotoTop()
+		a.detail = true
+		a.resize()
+		return a, nil
+
+	case storageDetailMsg:
+		a.storage.detail.SetContent(renderStorageDetail(msg.detail, a.width))
+		a.storage.detail.GotoTop()
+		a.detail = true
+		a.resize()
 		return a, nil
 
 	case errMsg:
 		a.loading = false
 		a.status = ""
 		a.errText = msg.err.Error()
-		a.resize() // footer grows; shrink the panes to fit
+		a.resize()
 		return a, nil
 
 	case actionDoneMsg:
@@ -251,10 +286,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.resize()
 		return a, nil
 
-	case storageDetailMsg:
-		a.storage.setDetail(msg.detail)
-		return a, nil
-
 	case tea.KeyPressMsg:
 		if a.errText != "" {
 			a.errText = ""
@@ -265,12 +296,27 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		case "tab":
 			a.active = (a.active + 1) % 3
-			a.pending, a.status = "", "" // don't carry a confirm prompt across tabs
+			a.detail = false
+			a.pending, a.status = "", ""
+			a.resize()
 			return a, nil
 		case "shift+tab":
 			a.active = (a.active + 2) % 3
+			a.detail = false
 			a.pending, a.status = "", ""
+			a.resize()
 			return a, nil
+		}
+		if a.detail {
+			if msg.String() == "esc" {
+				a.detail = false
+				a.resize()
+				return a, nil
+			}
+			var cmd tea.Cmd
+			d := a.activeDetail()
+			*d, cmd = d.Update(msg)
+			return a, cmd
 		}
 		switch a.active {
 		case 0:
@@ -283,44 +329,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return a, nil
-}
-
-// List-pane widths sized to the columns themselves (not a fixed fraction of the
-// screen), so the detail pane gets all the remaining space.
-const (
-	// Column content sums to 60 (no IP) / 76 (with IP); the bubbles table adds
-	// ~2 cols of cell padding per column, so the pane needs headroom or the
-	// rightmost column gets clipped.
-	listWidthWithIP = 90 // 76 content + 5×2 padding + margin
-	listWidthNoIP   = 72
-	minDetailWidth  = 40
-)
-
-// showIPColumn reports whether there is room for the list to carry the PUBLIC IP
-// column while still leaving a usable detail pane.
-func (a *App) showIPColumn() bool {
-	return a.width >= listWidthWithIP+minDetailWidth
-}
-
-func (a *App) listWidth() int {
-	w := listWidthNoIP
-	if a.showIPColumn() {
-		w = listWidthWithIP
-	}
-	// The list must keep its natural column width or the table overflows; on a
-	// pathologically narrow terminal, clamp to the full width instead.
-	if w > a.width {
-		w = a.width
-	}
-	return w
-}
-
-func (a *App) detailWidth() int {
-	w := a.width - a.listWidth() - 1
-	if w < 1 {
-		return 1
-	}
-	return w
 }
 
 // errorBlock renders the sticky error as red, wrapped to the terminal width and
@@ -339,10 +347,8 @@ func (a *App) errorBlock() string {
 	return strings.Join(lines, "\n")
 }
 
-// footerHeight is the number of rows the error block (if any) plus the single
-// status line occupy.
 func (a *App) footerHeight() int {
-	h := 1 // status line
+	h := 1
 	if eb := a.errorBlock(); eb != "" {
 		h += strings.Count(eb, "\n") + 1
 	}
@@ -350,25 +356,32 @@ func (a *App) footerHeight() int {
 }
 
 func (a *App) resize() {
-	bodyH := a.height - a.footerHeight() - 1 // -1 for the tab bar row
-	if bodyH < 1 {
-		bodyH = 1
+	footer := a.footerHeight()
+	// Always keep inactive lists at the correct width so they render correctly
+	// when the tab switches. Height is set for the active pane only.
+	for _, l := range []*table.Model{&a.pane.list, &a.storage.list, &a.network.list} {
+		l.SetWidth(a.width)
 	}
-	a.pane.setShowIP(a.showIPColumn())
-	a.pane.list.SetWidth(a.listWidth())
-	a.pane.list.SetHeight(bodyH)
-	a.pane.detail.SetWidth(a.detailWidth())
-	a.pane.detail.SetHeight(bodyH)
-	storageBodyH := bodyH - 1 // reserve a row for the storage sub-category bar
-	if storageBodyH < 1 {
-		storageBodyH = 1
+	if a.detail {
+		h := a.height - 1 - footer // -1 tab bar
+		if h < 1 {
+			h = 1
+		}
+		d := a.activeDetail()
+		d.SetWidth(a.width)
+		d.SetHeight(h)
+		return
 	}
-	a.storage.setSize(a.width, storageBodyH)
-	networkBodyH := bodyH - 1 // reserve a row for the network mode indicator
-	if networkBodyH < 1 {
-		networkBodyH = 1
+	chrome := 0
+	if a.active != 0 { // storage sub-bar or network indicator
+		chrome = 1
 	}
-	a.network.setSize(a.width, networkBodyH)
+	h := a.height - 1 - chrome - footer
+	if h < 1 {
+		h = 1
+	}
+	l := a.activeList()
+	l.SetHeight(h)
 }
 
 func maxInt(a, b int) int {
@@ -384,23 +397,28 @@ func (a *App) viewString() string {
 	}
 	tabBar := renderTabs(a.active, []string{"Servers", "Storage", "Networks"})
 
-	var body string
-	switch a.active {
-	case 0:
-		body = lipglossJoin(a.pane.list.View(), a.pane.detail.View())
-	case 1:
-		body = a.storage.subBar() + "\n" + a.storage.view()
-	default:
-		body = a.network.indicator() + "\n" + a.network.view()
-	}
-
-	status := a.status
-	if status == "" {
-		status = "tab switch · [ ] storage category · a all/private networks · ↑↓ select · enter details · s/x/r start/stop/restart · q quit"
+	var middle, status string
+	if a.detail {
+		middle = a.activeDetail().View()
+		status = "esc back · ↑↓ scroll · q quit"
+	} else {
+		switch a.active {
+		case 0:
+			middle = a.pane.listView()
+		case 1:
+			middle = a.storage.subBar() + "\n" + a.storage.listView()
+		default:
+			middle = a.network.indicator() + "\n" + a.network.listView()
+		}
+		if a.status != "" {
+			status = a.status
+		} else {
+			status = "tab switch · enter details · s/x/r start/stop/restart · [ ] storage category · a all/private nets · q quit"
+		}
 	}
 	status = truncate(status, a.width-2)
 
-	parts := []string{tabBar, body}
+	parts := []string{tabBar, middle}
 	if eb := a.errorBlock(); eb != "" {
 		parts = append(parts, eb)
 	}
