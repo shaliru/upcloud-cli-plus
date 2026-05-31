@@ -36,8 +36,48 @@ func TestRenderStorageDetail_Nil(t *testing.T) {
 
 func TestStoragePane_SelectedUUID(t *testing.T) {
 	p := newStoragePane()
-	p.setItems([]upcloud.Storage{{UUID: "s1", Title: "disk-a"}})
+	p.setItems([]upcloud.Storage{{UUID: "s1", Title: "disk-a", Type: upcloud.StorageTypeNormal}})
 	uuid, ok := p.selectedUUID()
 	require.True(t, ok)
 	assert.Equal(t, "s1", uuid)
+}
+
+func categorizedFakeStorages() []upcloud.Storage {
+	return []upcloud.Storage{
+		{UUID: "d1", Title: "disk-a", Type: upcloud.StorageTypeNormal, Access: upcloud.StorageAccessPrivate},
+		{UUID: "b1", Title: "backup-a", Type: upcloud.StorageTypeBackup, Access: upcloud.StorageAccessPrivate},
+		{UUID: "t1", Title: "Ubuntu 24.04", Type: upcloud.StorageTypeTemplate, Access: upcloud.StorageAccessPublic},
+	}
+}
+
+func TestStoragePane_PartitionsAndSwitches(t *testing.T) {
+	p := newStoragePane()
+	p.setSize(120, 20)
+	p.setItems(categorizedFakeStorages())
+
+	uuid, ok := p.selectedUUID()
+	require.True(t, ok)
+	assert.Equal(t, "d1", uuid)
+
+	p.nextSub()
+	uuid, ok = p.selectedUUID()
+	require.True(t, ok)
+	assert.Equal(t, "b1", uuid)
+
+	p.nextSub()
+	_, ok = p.selectedUUID()
+	assert.False(t, ok, "custom images empty")
+
+	p.nextSub()
+	uuid, ok = p.selectedUUID()
+	require.True(t, ok)
+	assert.Equal(t, "d1", uuid, "wraps back to devices")
+}
+
+func TestStoragePane_SubBarLabels(t *testing.T) {
+	p := newStoragePane()
+	bar := p.subBar()
+	assert.Contains(t, bar, "Devices")
+	assert.Contains(t, bar, "Backups")
+	assert.Contains(t, bar, "Custom images")
 }

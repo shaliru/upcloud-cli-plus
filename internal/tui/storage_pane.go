@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud"
+	"github.com/shaliru/upcloud-cli-plus/internal/cloud"
 	"github.com/shaliru/upcloud-cli-plus/internal/tui/styles"
 )
 
@@ -22,12 +23,15 @@ func lipglossJoin(left, right string) string {
 // storagePane is a read-only list + detail pane for storage. Detail is fetched
 // on enter (StorageDetails carries attached servers + backup info).
 type storagePane struct {
-	list   table.Model
-	detail viewport.Model
-	items  []upcloud.Storage
-	loaded bool
-	width  int
-	height int
+	list         table.Model
+	detail       viewport.Model
+	devices      []upcloud.Storage
+	backups      []upcloud.Storage
+	customImages []upcloud.Storage
+	sub          int // 0 = devices, 1 = backups, 2 = custom images
+	loaded       bool
+	width        int
+	height       int
 }
 
 func storageColumns() []table.Column {
@@ -54,17 +58,46 @@ func newStoragePane() storagePane {
 }
 
 func (p *storagePane) setItems(items []upcloud.Storage) {
-	p.items = items
+	p.devices = cloud.FilterStorageByCategory(items, "devices")
+	p.backups = cloud.FilterStorageByCategory(items, "backups")
+	p.customImages = cloud.FilterStorageByCategory(items, "images")
 	p.loaded = true
-	p.list.SetRows(storageRows(items))
+	p.refreshRows()
+}
+
+// active returns the storages for the current sub-category.
+func (p *storagePane) active() []upcloud.Storage {
+	switch p.sub {
+	case 1:
+		return p.backups
+	case 2:
+		return p.customImages
+	default:
+		return p.devices
+	}
+}
+
+func (p *storagePane) refreshRows() {
+	p.list.SetRows(storageRows(p.active()))
+	if len(p.active()) > 0 {
+		p.list.SetCursor(0)
+	}
+}
+
+func (p *storagePane) nextSub() { p.sub = (p.sub + 1) % 3; p.refreshRows() }
+func (p *storagePane) prevSub() { p.sub = (p.sub + 2) % 3; p.refreshRows() }
+
+func (p *storagePane) subBar() string {
+	return renderTabs(p.sub, []string{"Devices", "Backups", "Custom images"})
 }
 
 func (p *storagePane) selectedUUID() (string, bool) {
+	items := p.active()
 	cur := p.list.Cursor()
-	if cur < 0 || cur >= len(p.items) {
+	if cur < 0 || cur >= len(items) {
 		return "", false
 	}
-	return p.items[cur].UUID, true
+	return items[cur].UUID, true
 }
 
 func (p *storagePane) setDetail(d *upcloud.StorageDetails) {
@@ -93,7 +126,11 @@ func (p *storagePane) detailWidth() int {
 }
 
 func (p *storagePane) view() string {
-	return lipglossJoin(p.list.View(), p.detail.View())
+	left := p.list.View()
+	if len(p.active()) == 0 {
+		left = styles.Muted.Render("  (none)")
+	}
+	return lipglossJoin(left, p.detail.View())
 }
 
 // renderStorageDetail renders storage details (read-only), width-bounded.

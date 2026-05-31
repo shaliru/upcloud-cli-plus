@@ -145,7 +145,7 @@ func TestApp_StorageTabShowsLoadedStorage(t *testing.T) {
 	app := NewWithService(&cloud.Fake{})
 	app.width, app.height = 160, 30
 	app.resize()
-	_, _ = app.Update(storageLoadedMsg{items: []upcloud.Storage{{UUID: "s1", Title: "disk-a"}}})
+	_, _ = app.Update(storageLoadedMsg{items: []upcloud.Storage{{UUID: "s1", Title: "disk-a", Type: upcloud.StorageTypeNormal}}})
 	app.active = 1
 	assert.Contains(t, app.viewString(), "disk-a")
 }
