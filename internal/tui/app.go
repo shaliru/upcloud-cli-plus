@@ -147,24 +147,52 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, cmd
 }
 
-func (a *App) resize() {
-	listW := a.width / 2
-	bodyH := a.height - 2
-	// Show the PUBLIC IP column only when the list pane is wide enough for all
-	// columns (HOSTNAME+PLAN+ZONE+STATE+PUBLIC IP ≈ 76 plus cell padding).
-	a.pane.setShowIP(listW >= 80)
-	a.pane.list.SetWidth(listW)
-	a.pane.list.SetHeight(bodyH)
-	a.pane.detail.SetWidth(a.width - listW - 1)
-	a.pane.detail.SetHeight(bodyH)
+// List-pane widths sized to the columns themselves (not a fixed fraction of the
+// screen), so the detail pane gets all the remaining space.
+const (
+	// Column content sums to 60 (no IP) / 76 (with IP); the bubbles table adds
+	// ~2 cols of cell padding per column, so the pane needs headroom or the
+	// rightmost column gets clipped.
+	listWidthWithIP = 90 // 76 content + 5×2 padding + margin
+	listWidthNoIP   = 72
+	minDetailWidth  = 40
+)
+
+// showIPColumn reports whether there is room for the list to carry the PUBLIC IP
+// column while still leaving a usable detail pane.
+func (a *App) showIPColumn() bool {
+	return a.width >= listWidthWithIP+minDetailWidth
+}
+
+func (a *App) listWidth() int {
+	w := listWidthNoIP
+	if a.showIPColumn() {
+		w = listWidthWithIP
+	}
+	if w > a.width-minDetailWidth { // narrow terminal: don't starve the detail pane
+		w = a.width - minDetailWidth
+	}
+	if w < 1 {
+		w = a.width
+	}
+	return w
 }
 
 func (a *App) detailWidth() int {
-	w := a.width - a.width/2 - 1
+	w := a.width - a.listWidth() - 1
 	if w < 1 {
 		return 1
 	}
 	return w
+}
+
+func (a *App) resize() {
+	bodyH := a.height - 2
+	a.pane.setShowIP(a.showIPColumn())
+	a.pane.list.SetWidth(a.listWidth())
+	a.pane.list.SetHeight(bodyH)
+	a.pane.detail.SetWidth(a.detailWidth())
+	a.pane.detail.SetHeight(bodyH)
 }
 
 func (a *App) viewString() string {
