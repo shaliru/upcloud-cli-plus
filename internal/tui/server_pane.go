@@ -47,6 +47,11 @@ func (p *serverPane) setShowIP(show bool) {
 // rebuild refreshes the table rows from the current servers, IP map and showIP.
 func (p *serverPane) rebuild() {
 	p.list.SetRows(serverRows(p.servers, p.ipByUUID, p.showIP))
+	// table.SetRows clamps the cursor down but never back up, so an earlier
+	// SetRows on an empty table can leave it at -1; restore it when rows exist.
+	if p.list.Cursor() < 0 && len(p.servers) > 0 {
+		p.list.SetCursor(0)
+	}
 }
 
 // selectedUUID returns the UUID of the highlighted server, or "" if none.

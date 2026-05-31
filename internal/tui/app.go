@@ -242,9 +242,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		case "tab":
 			a.active = (a.active + 1) % 3
+			a.pending, a.status = "", "" // don't carry a confirm prompt across tabs
 			return a, nil
 		case "shift+tab":
 			a.active = (a.active + 2) % 3
+			a.pending, a.status = "", ""
 			return a, nil
 		}
 		switch a.active {

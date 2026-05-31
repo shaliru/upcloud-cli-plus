@@ -115,6 +115,20 @@ func TestApp_TabCyclesActive(t *testing.T) {
 	assert.Equal(t, 0, app.active, "wraps around")
 }
 
+func TestApp_TabClearsPendingConfirm(t *testing.T) {
+	f := &cloud.Fake{Servers: []upcloud.Server{{UUID: "u1", Hostname: "web-sg-1", State: "started"}}}
+	app := NewWithService(f)
+	app.width, app.height = 160, 30
+	app.resize()
+	_, _ = app.Update(serversLoadedMsg{servers: f.Servers})
+
+	_, _ = app.Update(tea.KeyPressMsg{Code: 'r', Text: "r"}) // arm a confirm
+	require.NotEmpty(t, app.pending)
+	_, _ = app.Update(tea.KeyPressMsg{Code: '\t', Text: "tab"})
+	assert.Empty(t, app.pending, "switching tabs clears the pending confirm")
+	assert.Empty(t, app.status, "switching tabs clears the confirm prompt")
+}
+
 func TestApp_StorageTabShowsLoadedStorage(t *testing.T) {
 	app := NewWithService(&cloud.Fake{})
 	app.width, app.height = 160, 30
