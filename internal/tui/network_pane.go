@@ -1,0 +1,116 @@
+package tui
+
+import (
+	"strings"
+
+	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/viewport"
+	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud"
+	"github.com/shaliru/upcloud-cli-plus/internal/tui/styles"
+)
+
+const networkListWidth = 52 // NAME+TYPE+ZONE + cell padding
+
+// networkPane is a read-only list + detail pane for networks. Detail renders
+// directly from the loaded list item (GetNetworks already returns full objects).
+type networkPane struct {
+	list   table.Model
+	detail viewport.Model
+	items  []upcloud.Network
+	loaded bool
+	width  int
+	height int
+}
+
+func networkColumns() []table.Column {
+	return []table.Column{
+		{Title: "NAME", Width: 24},
+		{Title: "TYPE", Width: 10},
+		{Title: "ZONE", Width: 10},
+	}
+}
+
+func networkRows(items []upcloud.Network) []table.Row {
+	rows := make([]table.Row, 0, len(items))
+	for _, n := range items {
+		rows = append(rows, table.Row{n.Name, n.Type, n.Zone})
+	}
+	return rows
+}
+
+func newNetworkPane() networkPane {
+	t := table.New(table.WithColumns(networkColumns()), table.WithFocused(true), table.WithHeight(10))
+	return networkPane{list: t, detail: viewport.New()}
+}
+
+func (p *networkPane) setItems(items []upcloud.Network) {
+	p.items = items
+	p.loaded = true
+	p.list.SetRows(networkRows(items))
+}
+
+func (p *networkPane) selectedItem() (upcloud.Network, bool) {
+	cur := p.list.Cursor()
+	if cur < 0 || cur >= len(p.items) {
+		return upcloud.Network{}, false
+	}
+	return p.items[cur], true
+}
+
+// showSelectedDetail renders the highlighted network into the detail viewport.
+func (p *networkPane) showSelectedDetail() {
+	if n, ok := p.selectedItem(); ok {
+		p.detail.SetContent(renderNetworkDetail(&n, p.detailWidth()))
+		p.detail.GotoTop()
+	}
+}
+
+func (p *networkPane) setSize(w, h int) {
+	p.width, p.height = w, h
+	lw := networkListWidth
+	if lw > w {
+		lw = w
+	}
+	p.list.SetWidth(lw)
+	p.list.SetHeight(h)
+	p.detail.SetWidth(p.detailWidth())
+	p.detail.SetHeight(h)
+}
+
+func (p *networkPane) detailWidth() int {
+	w := p.width - networkListWidth - 1
+	if w < 1 {
+		return 1
+	}
+	return w
+}
+
+func (p *networkPane) view() string {
+	return lipglossJoin(p.list.View(), p.detail.View())
+}
+
+// renderNetworkDetail renders network details (read-only), width-bounded.
+func renderNetworkDetail(n *upcloud.Network, width int) string {
+	if n == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(styles.Title.Render(truncate(n.Name, width)) + "\n")
+	b.WriteString(styles.Muted.Render(truncate(n.UUID, width)) + "\n\n")
+	b.WriteString(styles.Title.Render("Overview") + "\n")
+	b.WriteString(kv("Type", n.Type, width))
+	b.WriteString(kv("Zone", n.Zone, width))
+	b.WriteString(kv("Router", n.Router, width))
+	b.WriteString("\n")
+	b.WriteString(styles.Title.Render("IP networks") + "\n")
+	if len(n.IPNetworks) == 0 {
+		b.WriteString(styles.Muted.Render("  (none)") + "\n")
+	} else {
+		rows := make([][]string, 0, len(n.IPNetworks))
+		for _, ipn := range n.IPNetworks {
+			rows = append(rows, []string{ipn.Address, ipn.Family, "gw " + ipn.Gateway})
+		}
+		b.WriteString(alignColumns(rows, width))
+	}
+	return b.String()
+}
