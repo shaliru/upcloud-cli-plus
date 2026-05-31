@@ -20,12 +20,13 @@ func sampleServers() []upcloud.Server {
 func TestServersTable(t *testing.T) {
 	var buf bytes.Buffer
 	require.NoError(t, ServersTable(&buf, sampleServers()))
-
 	out := buf.String()
 	assert.Contains(t, out, "HOSTNAME")
 	assert.Contains(t, out, "web-sg-1")
-	assert.Contains(t, out, "started")
+	assert.Contains(t, out, "● started", "state dot")
+	assert.Contains(t, out, "2 servers", "footer")
 	assert.Less(t, strings.Index(out, "HOSTNAME"), strings.Index(out, "web-sg-1"))
+	assert.NotContains(t, out, "\x1b[", "no colour by default")
 }
 
 func TestJSON(t *testing.T) {
@@ -44,11 +45,11 @@ func TestStoragesTable(t *testing.T) {
 	var buf bytes.Buffer
 	require.NoError(t, StoragesTable(&buf, []upcloud.Storage{
 		{UUID: "s1", Title: "disk-a", Size: 25, Zone: "sg-sin1", State: "online", Type: "normal", Tier: "maxiops"},
-	}))
+	}, "device"))
 	out := buf.String()
 	assert.Contains(t, out, "TITLE")
 	assert.Contains(t, out, "disk-a")
-	assert.Contains(t, out, "25")
+	assert.Contains(t, out, "1 device", "footer with caller noun")
 }
 
 func TestNetworksTable(t *testing.T) {
@@ -59,5 +60,5 @@ func TestNetworksTable(t *testing.T) {
 	out := buf.String()
 	assert.Contains(t, out, "NAME")
 	assert.Contains(t, out, "net-a")
-	assert.Contains(t, out, "private")
+	assert.Contains(t, out, "1 network")
 }

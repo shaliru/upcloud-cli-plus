@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud"
+	"github.com/shaliru/upcloud-cli-plus/internal/palette"
 	"gopkg.in/yaml.v3"
 )
 
@@ -32,14 +33,20 @@ func YAML(w io.Writer, v any) error {
 	return yaml.NewEncoder(w).Encode(v)
 }
 
-// ServersTable writes a server list as an aligned table.
+// ServersTable writes a server list as a styled table.
 func ServersTable(w io.Writer, servers []upcloud.Server) error {
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "UUID\tHOSTNAME\tPLAN\tZONE\tSTATE")
-	for _, s := range servers {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", s.UUID, s.Hostname, s.Plan, s.Zone, s.State)
+	cols := []Column{
+		{Header: "UUID", ColorFn: func(s string) string { return colorize(palette.Blue, s) }},
+		{Header: "HOSTNAME", MaxWidth: 40},
+		{Header: "PLAN"},
+		{Header: "ZONE"},
+		{Header: "STATE", ColorFn: stateColorFn},
 	}
-	return tw.Flush()
+	rows := make([][]string, 0, len(servers))
+	for _, s := range servers {
+		rows = append(rows, []string{s.UUID, s.Hostname, s.Plan, s.Zone, stateText(s.State)})
+	}
+	return WriteTable(w, cols, rows, "server")
 }
 
 // ServerDetailsText writes a single server's key fields as aligned key/value lines.
@@ -54,14 +61,22 @@ func ServerDetailsText(w io.Writer, d *upcloud.ServerDetails) error {
 	return tw.Flush()
 }
 
-// StoragesTable writes a storage list as an aligned table.
-func StoragesTable(w io.Writer, storages []upcloud.Storage) error {
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "UUID\tTITLE\tSIZE (GB)\tZONE\tTIER\tSTATE")
-	for _, s := range storages {
-		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\t%s\n", s.UUID, s.Title, s.Size, s.Zone, s.Tier, s.State)
+// StoragesTable writes a storage list as a styled table. noun labels the footer
+// (e.g. "device", "backup") since the list may be any category.
+func StoragesTable(w io.Writer, storages []upcloud.Storage, noun string) error {
+	cols := []Column{
+		{Header: "UUID", ColorFn: func(s string) string { return colorize(palette.Blue, s) }},
+		{Header: "TITLE", MaxWidth: 40},
+		{Header: "SIZE (GB)", Align: AlignRight},
+		{Header: "ZONE"},
+		{Header: "TIER"},
+		{Header: "STATE", ColorFn: stateColorFn},
 	}
-	return tw.Flush()
+	rows := make([][]string, 0, len(storages))
+	for _, s := range storages {
+		rows = append(rows, []string{s.UUID, s.Title, fmt.Sprintf("%d", s.Size), s.Zone, s.Tier, stateText(s.State)})
+	}
+	return WriteTable(w, cols, rows, noun)
 }
 
 // StorageDetailsText writes a single storage's key fields as aligned key/value lines.
@@ -77,14 +92,27 @@ func StorageDetailsText(w io.Writer, d *upcloud.StorageDetails) error {
 	return tw.Flush()
 }
 
-// NetworksTable writes a network list as an aligned table.
+// NetworksTable writes a network list as a styled table.
 func NetworksTable(w io.Writer, networks []upcloud.Network) error {
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "UUID\tNAME\tTYPE\tZONE")
-	for _, n := range networks {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", n.UUID, n.Name, n.Type, n.Zone)
+	cols := []Column{
+		{Header: "UUID", ColorFn: func(s string) string { return colorize(palette.Blue, s) }},
+		{Header: "NAME", MaxWidth: 40},
+		{Header: "TYPE"},
+		{Header: "ZONE"},
 	}
-	return tw.Flush()
+	rows := make([][]string, 0, len(networks))
+	for _, n := range networks {
+		rows = append(rows, []string{n.UUID, n.Name, n.Type, n.Zone})
+	}
+	return WriteTable(w, cols, rows, "network")
+}
+
+// stateText prefixes a non-empty state with a ● dot for the STATE column.
+func stateText(state string) string {
+	if state == "" {
+		return ""
+	}
+	return "● " + state
 }
 
 // NetworkDetailsText writes a single network's key fields and its IP networks.

@@ -10,6 +10,19 @@ import (
 
 var validStorageTypes = map[string]bool{"devices": true, "backups": true, "images": true, "all": true}
 
+func storageNoun(t string) string {
+	switch t {
+	case "backups":
+		return "backup"
+	case "images":
+		return "custom image"
+	case "all":
+		return "storage item"
+	default:
+		return "device"
+	}
+}
+
 // NewListCommand builds `storage list`.
 func NewListCommand(factory ServiceFactory) *cobra.Command {
 	var format string
@@ -38,7 +51,7 @@ func NewListCommand(factory ServiceFactory) *cobra.Command {
 			case output.FormatYAML:
 				return output.YAML(cmd.OutOrStdout(), storages)
 			default:
-				return output.StoragesTable(cmd.OutOrStdout(), storages)
+				return output.StoragesTable(cmd.OutOrStdout(), storages, storageNoun(storageType))
 			}
 		},
 	}
