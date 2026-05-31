@@ -3,6 +3,7 @@ package tui
 
 import (
 	"context"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
@@ -18,9 +19,14 @@ type App struct {
 	width   int
 	height  int
 	loading bool
-	status  string
+	status  string // transient, single-line hint/feedback
+	errText string // sticky full error, wrapped in the footer until acknowledged
 	pending string // action awaiting confirmation: "start"/"stop"/"restart"
 }
+
+// maxErrorLines caps the wrapped error footer so a pathologically long error
+// can't consume the whole screen. Typical API errors are 1–3 wrapped lines.
+const maxErrorLines = 8
 
 func NewWithService(svc cloud.Service) *App {
 	return &App{svc: svc, pane: newServerPane(), loading: true}
@@ -103,14 +109,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errMsg:
 		a.loading = false
-		a.status = "error: " + msg.err.Error()
+		a.status = ""
+		a.errText = msg.err.Error()
+		a.resize() // footer grows; shrink the panes to fit
 		return a, nil
 
 	case actionDoneMsg:
+		a.errText = ""
 		a.status = msg.action + " ok"
+		a.resize()
 		return a, a.loadServersCmd()
 
 	case tea.KeyPressMsg:
+		// Any keypress acknowledges a sticky error and reclaims the footer space;
+		// the key still performs its normal action below.
+		if a.errText != "" {
+			a.errText = ""
+			a.resize()
+		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return a, tea.Quit
@@ -185,8 +201,37 @@ func (a *App) detailWidth() int {
 	return w
 }
 
+// errorBlock renders the sticky error as red, wrapped to the terminal width and
+// capped at maxErrorLines. Returns "" when there is no error.
+func (a *App) errorBlock() string {
+	if a.errText == "" {
+		return ""
+	}
+	style := lipgloss.NewStyle().Foreground(styles.ColorErr)
+	wrapped := style.Width(maxInt(a.width, 1)).Render("error: " + a.errText)
+	lines := strings.Split(wrapped, "\n")
+	if len(lines) > maxErrorLines {
+		lines = lines[:maxErrorLines]
+		lines[maxErrorLines-1] = style.Render("… (error truncated — see CLI for full text)")
+	}
+	return strings.Join(lines, "\n")
+}
+
+// footerHeight is the number of rows the error block (if any) plus the single
+// status line occupy.
+func (a *App) footerHeight() int {
+	h := 1 // status line
+	if eb := a.errorBlock(); eb != "" {
+		h += strings.Count(eb, "\n") + 1
+	}
+	return h
+}
+
 func (a *App) resize() {
-	bodyH := a.height - 2
+	bodyH := a.height - a.footerHeight()
+	if bodyH < 1 {
+		bodyH = 1
+	}
 	a.pane.setShowIP(a.showIPColumn())
 	a.pane.list.SetWidth(a.listWidth())
 	a.pane.list.SetHeight(bodyH)
@@ -194,19 +239,33 @@ func (a *App) resize() {
 	a.pane.detail.SetHeight(bodyH)
 }
 
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func (a *App) viewString() string {
 	if a.loading {
 		return "Loading servers…"
 	}
 	body := lipgloss.JoinHorizontal(lipgloss.Top, a.pane.list.View(), a.pane.detail.View())
+
 	status := a.status
 	if status == "" {
 		status = "↑↓ select · enter details · s/x/r start/stop/restart · q quit"
 	}
-	// StatusBar has 1 col of padding each side; truncate so the line never
-	// overflows the terminal width.
+	// StatusBar has 1 col of padding each side; truncate the single-line hint so
+	// it never overflows. (Full errors go in the wrapped error block, not here.)
 	status = truncate(status, a.width-2)
-	return body + "\n" + styles.StatusBar.Render(status)
+
+	parts := []string{body}
+	if eb := a.errorBlock(); eb != "" {
+		parts = append(parts, eb)
+	}
+	parts = append(parts, styles.StatusBar.Render(status))
+	return strings.Join(parts, "\n")
 }
 
 func (a *App) View() tea.View {
