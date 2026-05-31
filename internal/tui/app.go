@@ -16,6 +16,9 @@ type ServiceFactory func(ctx context.Context) (cloud.Service, error)
 type App struct {
 	svc     cloud.Service
 	pane    serverPane
+	storage storagePane
+	network networkPane
+	active  int // 0 = servers, 1 = storage, 2 = networks
 	width   int
 	height  int
 	loading bool
@@ -29,10 +32,18 @@ type App struct {
 const maxErrorLines = 8
 
 func NewWithService(svc cloud.Service) *App {
-	return &App{svc: svc, pane: newServerPane(), loading: true}
+	return &App{
+		svc:     svc,
+		pane:    newServerPane(),
+		storage: newStoragePane(),
+		network: newNetworkPane(),
+		loading: true,
+	}
 }
 
-func (a *App) Init() tea.Cmd { return tea.Batch(a.loadServersCmd(), a.loadIPsCmd()) }
+func (a *App) Init() tea.Cmd {
+	return tea.Batch(a.loadServersCmd(), a.loadIPsCmd(), a.loadStorageCmd(), a.loadNetworksCmd())
+}
 
 func (a *App) loadServersCmd() tea.Cmd {
 	return func() tea.Msg {
@@ -53,6 +64,36 @@ func (a *App) loadIPsCmd() tea.Cmd {
 			return ipsLoadedMsg{ips: nil}
 		}
 		return ipsLoadedMsg{ips: ips}
+	}
+}
+
+func (a *App) loadStorageCmd() tea.Cmd {
+	return func() tea.Msg {
+		items, err := a.svc.ListStorage(context.Background())
+		if err != nil {
+			return errMsg{err: err}
+		}
+		return storageLoadedMsg{items: items}
+	}
+}
+
+func (a *App) loadNetworksCmd() tea.Cmd {
+	return func() tea.Msg {
+		items, err := a.svc.ListNetworks(context.Background())
+		if err != nil {
+			return errMsg{err: err}
+		}
+		return networksLoadedMsg{items: items}
+	}
+}
+
+func (a *App) loadStorageDetailCmd(uuid string) tea.Cmd {
+	return func() tea.Msg {
+		d, err := a.svc.GetStorage(context.Background(), uuid)
+		if err != nil {
+			return errMsg{err: err}
+		}
+		return storageDetailMsg{detail: d}
 	}
 }
 
@@ -82,6 +123,61 @@ func (a *App) loadDetailCmd(uuid string) tea.Cmd {
 		}
 		return serverDetailMsg{detail: d}
 	}
+}
+
+func (a *App) updateServers(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		if uuid := a.pane.selectedUUID(); uuid != "" {
+			return a, a.loadDetailCmd(uuid)
+		}
+		return a, nil
+	case "s", "x", "r":
+		if a.pane.selectedUUID() != "" {
+			a.pending = map[string]string{"s": "start", "x": "stop", "r": "restart"}[msg.String()]
+			a.status = "confirm " + a.pending + "? (y/n)"
+		}
+		return a, nil
+	case "y":
+		if a.pending != "" {
+			uuid := a.pane.selectedUUID()
+			action := a.pending
+			a.pending = ""
+			a.status = action + "ing…"
+			return a, a.actionCmd(action, uuid)
+		}
+	case "n", "esc":
+		if a.pending != "" {
+			a.pending = ""
+			a.status = ""
+			return a, nil
+		}
+	}
+	var cmd tea.Cmd
+	a.pane.list, cmd = a.pane.list.Update(msg)
+	return a, cmd
+}
+
+func (a *App) updateStorage(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "enter" {
+		if uuid, ok := a.storage.selectedUUID(); ok {
+			return a, a.loadStorageDetailCmd(uuid)
+		}
+		return a, nil
+	}
+	var cmd tea.Cmd
+	a.storage.list, cmd = a.storage.list.Update(msg)
+	return a, cmd
+}
+
+func (a *App) updateNetworks(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "enter" {
+		a.network.showSelectedDetail()
+		return a, nil
+	}
+	var cmd tea.Cmd
+	a.network.list, cmd = a.network.list.Update(msg)
+	return a, cmd
 }
 
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -120,9 +216,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.resize()
 		return a, a.loadServersCmd()
 
+	case storageLoadedMsg:
+		a.loading = false
+		a.storage.setItems(msg.items)
+		a.resize()
+		return a, nil
+
+	case networksLoadedMsg:
+		a.loading = false
+		a.network.setItems(msg.items)
+		a.resize()
+		return a, nil
+
+	case storageDetailMsg:
+		a.storage.setDetail(msg.detail)
+		return a, nil
+
 	case tea.KeyPressMsg:
-		// Any keypress acknowledges a sticky error and reclaims the footer space;
-		// the key still performs its normal action below.
 		if a.errText != "" {
 			a.errText = ""
 			a.resize()
@@ -130,37 +240,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return a, tea.Quit
-		case "enter":
-			if uuid := a.pane.selectedUUID(); uuid != "" {
-				return a, a.loadDetailCmd(uuid)
-			}
+		case "tab":
+			a.active = (a.active + 1) % 3
 			return a, nil
-		case "s", "x", "r":
-			if a.pane.selectedUUID() != "" {
-				a.pending = map[string]string{"s": "start", "x": "stop", "r": "restart"}[msg.String()]
-				a.status = "confirm " + a.pending + "? (y/n)"
-			}
+		case "shift+tab":
+			a.active = (a.active + 2) % 3
 			return a, nil
-		case "y":
-			if a.pending != "" {
-				uuid := a.pane.selectedUUID()
-				action := a.pending
-				a.pending = ""
-				a.status = action + "ing…"
-				return a, a.actionCmd(action, uuid)
-			}
-		case "n", "esc":
-			if a.pending != "" {
-				a.pending = ""
-				a.status = ""
-				return a, nil
-			}
+		}
+		switch a.active {
+		case 0:
+			return a.updateServers(msg)
+		case 1:
+			return a.updateStorage(msg)
+		default:
+			return a.updateNetworks(msg)
 		}
 	}
 
-	var cmd tea.Cmd
-	a.pane.list, cmd = a.pane.list.Update(msg)
-	return a, cmd
+	return a, nil
 }
 
 // List-pane widths sized to the columns themselves (not a fixed fraction of the
@@ -228,7 +325,7 @@ func (a *App) footerHeight() int {
 }
 
 func (a *App) resize() {
-	bodyH := a.height - a.footerHeight()
+	bodyH := a.height - a.footerHeight() - 1 // -1 for the tab bar row
 	if bodyH < 1 {
 		bodyH = 1
 	}
@@ -237,6 +334,8 @@ func (a *App) resize() {
 	a.pane.list.SetHeight(bodyH)
 	a.pane.detail.SetWidth(a.detailWidth())
 	a.pane.detail.SetHeight(bodyH)
+	a.storage.setSize(a.width, bodyH)
+	a.network.setSize(a.width, bodyH)
 }
 
 func maxInt(a, b int) int {
@@ -248,19 +347,27 @@ func maxInt(a, b int) int {
 
 func (a *App) viewString() string {
 	if a.loading {
-		return "Loading servers…"
+		return "Loading…"
 	}
-	body := lipgloss.JoinHorizontal(lipgloss.Top, a.pane.list.View(), a.pane.detail.View())
+	tabBar := renderTabs(a.active, []string{"Servers", "Storage", "Networks"})
+
+	var body string
+	switch a.active {
+	case 0:
+		body = lipglossJoin(a.pane.list.View(), a.pane.detail.View())
+	case 1:
+		body = a.storage.view()
+	default:
+		body = a.network.view()
+	}
 
 	status := a.status
 	if status == "" {
-		status = "↑↓ select · enter details · s/x/r start/stop/restart · q quit"
+		status = "tab switch · ↑↓ select · enter details · s/x/r start/stop/restart · q quit"
 	}
-	// StatusBar has 1 col of padding each side; truncate the single-line hint so
-	// it never overflows. (Full errors go in the wrapped error block, not here.)
 	status = truncate(status, a.width-2)
 
-	parts := []string{body}
+	parts := []string{tabBar, body}
 	if eb := a.errorBlock(); eb != "" {
 		parts = append(parts, eb)
 	}

@@ -102,6 +102,37 @@ func TestApp_RestartActionCallsService(t *testing.T) {
 	assert.Equal(t, []string{"u1"}, f.Restarted)
 }
 
+func TestApp_TabCyclesActive(t *testing.T) {
+	app := NewWithService(&cloud.Fake{})
+	app.width, app.height = 160, 30
+	app.resize()
+	require.Equal(t, 0, app.active)
+	_, _ = app.Update(tea.KeyPressMsg{Code: '\t', Text: "tab"})
+	assert.Equal(t, 1, app.active)
+	_, _ = app.Update(tea.KeyPressMsg{Code: '\t', Text: "tab"})
+	assert.Equal(t, 2, app.active)
+	_, _ = app.Update(tea.KeyPressMsg{Code: '\t', Text: "tab"})
+	assert.Equal(t, 0, app.active, "wraps around")
+}
+
+func TestApp_StorageTabShowsLoadedStorage(t *testing.T) {
+	app := NewWithService(&cloud.Fake{})
+	app.width, app.height = 160, 30
+	app.resize()
+	_, _ = app.Update(storageLoadedMsg{items: []upcloud.Storage{{UUID: "s1", Title: "disk-a"}}})
+	app.active = 1
+	assert.Contains(t, app.viewString(), "disk-a")
+}
+
+func TestApp_NetworkTabShowsLoadedNetworks(t *testing.T) {
+	app := NewWithService(&cloud.Fake{})
+	app.width, app.height = 160, 30
+	app.resize()
+	_, _ = app.Update(networksLoadedMsg{items: []upcloud.Network{{UUID: "n1", Name: "net-a"}}})
+	app.active = 2
+	assert.Contains(t, app.viewString(), "net-a")
+}
+
 type errorString string
 
 func (e errorString) Error() string { return string(e) }
