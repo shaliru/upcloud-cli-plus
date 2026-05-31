@@ -1,6 +1,21 @@
 package cli
 
-import "testing"
+import (
+	"bytes"
+	"context"
+	"testing"
+
+	"github.com/shaliru/upcloud-cli-plus/internal/cloud"
+	"github.com/stretchr/testify/assert"
+)
+
+func TestRoot_ColorFlagValidated(t *testing.T) {
+	root := newRootCommand(func(context.Context) (cloud.Service, error) { return &cloud.Fake{}, nil })
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"--color", "bogus", "server", "list"})
+	assert.Error(t, root.Execute())
+}
 
 func TestShouldLaunchTUI(t *testing.T) {
 	cases := []struct {

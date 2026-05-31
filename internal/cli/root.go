@@ -13,6 +13,7 @@ import (
 	"github.com/shaliru/upcloud-cli-plus/internal/cli/server"
 	"github.com/shaliru/upcloud-cli-plus/internal/cli/storage"
 	"github.com/shaliru/upcloud-cli-plus/internal/cloud"
+	"github.com/shaliru/upcloud-cli-plus/internal/output"
 	"github.com/shaliru/upcloud-cli-plus/internal/config"
 	"github.com/shaliru/upcloud-cli-plus/internal/tui"
 	"github.com/spf13/cobra"
@@ -50,12 +51,24 @@ func launchTUI(ctx context.Context, factory server.ServiceFactory, resource stri
 }
 
 func newRootCommand(factory server.ServiceFactory) *cobra.Command {
+	var colorMode string
 	root := &cobra.Command{
 		Use:           "upctl-plus",
 		Short:         "Enhanced UpCloud CLI with an interactive dashboard",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			switch colorMode {
+			case "auto", "always", "never":
+			default:
+				return fmt.Errorf("invalid --color %q: want auto, always, or never", colorMode)
+			}
+			isTTY := term.IsTerminal(int(os.Stdout.Fd()))
+			output.EnableColor(output.ColorDecision(colorMode, isTTY, os.Getenv("NO_COLOR")))
+			return nil
+		},
 	}
+	root.PersistentFlags().StringVar(&colorMode, "color", "auto", "Colour output: auto, always, never")
 	root.AddCommand(server.NewCommand(factory))
 	root.AddCommand(storage.NewCommand(storage.ServiceFactory(factory)))
 	root.AddCommand(network.NewCommand(network.ServiceFactory(factory)))
