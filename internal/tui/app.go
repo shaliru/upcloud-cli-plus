@@ -190,7 +190,11 @@ func (a *App) updateStorage(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) updateNetworks(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if msg.String() == "enter" {
+	switch msg.String() {
+	case "a":
+		a.network.toggleAll()
+		return a, nil
+	case "enter":
 		a.network.showSelectedDetail()
 		return a, nil
 	}
@@ -360,7 +364,11 @@ func (a *App) resize() {
 		storageBodyH = 1
 	}
 	a.storage.setSize(a.width, storageBodyH)
-	a.network.setSize(a.width, bodyH)
+	networkBodyH := bodyH - 1 // reserve a row for the network mode indicator
+	if networkBodyH < 1 {
+		networkBodyH = 1
+	}
+	a.network.setSize(a.width, networkBodyH)
 }
 
 func maxInt(a, b int) int {
@@ -383,12 +391,12 @@ func (a *App) viewString() string {
 	case 1:
 		body = a.storage.subBar() + "\n" + a.storage.view()
 	default:
-		body = a.network.view()
+		body = a.network.indicator() + "\n" + a.network.view()
 	}
 
 	status := a.status
 	if status == "" {
-		status = "tab switch · [ ] storage category · ↑↓ select · enter details · s/x/r start/stop/restart · q quit"
+		status = "tab switch · [ ] storage category · a all/private networks · ↑↓ select · enter details · s/x/r start/stop/restart · q quit"
 	}
 	status = truncate(status, a.width-2)
 

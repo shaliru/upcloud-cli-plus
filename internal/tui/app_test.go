@@ -179,6 +179,25 @@ func TestApp_StorageSubCategorySwitch(t *testing.T) {
 	assert.NotContains(t, out, "disk-a")
 }
 
+func TestApp_NetworkToggleAll(t *testing.T) {
+	app := NewWithService(&cloud.Fake{})
+	app.width, app.height = 160, 30
+	app.resize()
+	app.active = 2 // network tab
+	_, _ = app.Update(networksLoadedMsg{items: []upcloud.Network{
+		{UUID: "n1", Name: "net-a", Type: upcloud.NetworkTypePrivate},
+		{UUID: "pub1", Name: "Public sg-sin1", Type: upcloud.NetworkTypePublic},
+	}})
+	out := app.viewString()
+	assert.Contains(t, out, "net-a")
+	assert.Contains(t, out, "private")
+	assert.NotContains(t, out, "Public sg-sin1")
+
+	_, _ = app.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	out = app.viewString()
+	assert.Contains(t, out, "Public sg-sin1", "toggled to all")
+}
+
 type errorString string
 
 func (e errorString) Error() string { return string(e) }
