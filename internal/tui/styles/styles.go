@@ -27,8 +27,8 @@ var (
 		BorderForeground(ColorBorder)
 
 	PaneFocused = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorAccent)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ColorAccent)
 )
 
 // StateColor returns the colour for a server state string.
