@@ -19,6 +19,7 @@ type App struct {
 	height  int
 	loading bool
 	status  string
+	pending string // action awaiting confirmation: "start"/"stop"/"restart"
 }
 
 func NewWithService(svc cloud.Service) *App {
@@ -34,6 +35,24 @@ func (a *App) loadServersCmd() tea.Cmd {
 			return errMsg{err: err}
 		}
 		return serversLoadedMsg{servers: servers}
+	}
+}
+
+func (a *App) actionCmd(action, uuid string) tea.Cmd {
+	return func() tea.Msg {
+		var err error
+		switch action {
+		case "start":
+			err = a.svc.StartServer(context.Background(), uuid)
+		case "stop":
+			err = a.svc.StopServer(context.Background(), uuid)
+		default:
+			err = a.svc.RestartServer(context.Background(), uuid)
+		}
+		if err != nil {
+			return errMsg{err: err}
+		}
+		return actionDoneMsg{action: action, ref: uuid}
 	}
 }
 
@@ -71,6 +90,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.status = "error: " + msg.err.Error()
 		return a, nil
 
+	case actionDoneMsg:
+		a.status = msg.action + " ok"
+		return a, a.loadServersCmd()
+
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -80,6 +103,26 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, a.loadDetailCmd(uuid)
 			}
 			return a, nil
+		case "s", "x", "r":
+			if a.pane.selectedUUID() != "" {
+				a.pending = map[string]string{"s": "start", "x": "stop", "r": "restart"}[msg.String()]
+				a.status = "confirm " + a.pending + "? (y/n)"
+			}
+			return a, nil
+		case "y":
+			if a.pending != "" {
+				uuid := a.pane.selectedUUID()
+				action := a.pending
+				a.pending = ""
+				a.status = action + "ing…"
+				return a, a.actionCmd(action, uuid)
+			}
+		case "n", "esc":
+			if a.pending != "" {
+				a.pending = ""
+				a.status = ""
+				return a, nil
+			}
 		}
 	}
 
