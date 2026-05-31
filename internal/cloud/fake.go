@@ -11,6 +11,7 @@ import (
 type Fake struct {
 	Servers []upcloud.Server
 	Details map[string]*upcloud.ServerDetails
+	IPs     []upcloud.IPAddress
 	Err     error
 
 	Started   []string
@@ -34,6 +35,13 @@ func (f *Fake) GetServer(ctx context.Context, uuid string) (*upcloud.ServerDetai
 		return nil, fmt.Errorf("server %q not found", uuid)
 	}
 	return d, nil
+}
+
+func (f *Fake) ListIPAddresses(ctx context.Context) ([]upcloud.IPAddress, error) {
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	return f.IPs, nil
 }
 
 func (f *Fake) StartServer(ctx context.Context, uuid string) error {

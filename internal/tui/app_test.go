@@ -19,6 +19,25 @@ func TestApp_QuitOnQ(t *testing.T) {
 	assert.True(t, isQuit, "pressing q should issue tea.Quit")
 }
 
+func TestApp_PublicIPColumnPopulates(t *testing.T) {
+	f := &cloud.Fake{Servers: []upcloud.Server{{UUID: "u1", Hostname: "web-sg-1", State: "started"}}}
+	app := NewWithService(f)
+	app.width, app.height = 200, 30 // wide enough → PUBLIC IP column shown
+	app.resize()
+	_, _ = app.Update(serversLoadedMsg{servers: f.Servers})
+	_, _ = app.Update(ipsLoadedMsg{ips: []upcloud.IPAddress{
+		{Access: "public", Family: "IPv4", Address: "94.237.73.201", ServerUUID: "u1"},
+	}})
+	assert.Contains(t, app.viewString(), "94.237.73.201")
+}
+
+func TestApp_NarrowHidesIPColumn(t *testing.T) {
+	app := NewWithService(&cloud.Fake{})
+	app.width, app.height = 80, 30 // listW=40 < 80 → no IP column
+	app.resize()
+	assert.False(t, app.pane.showIP)
+}
+
 func TestApp_ServersLoadedPopulatesTable(t *testing.T) {
 	app := NewWithService(&cloud.Fake{})
 	app.width, app.height = 100, 30

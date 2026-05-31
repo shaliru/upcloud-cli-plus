@@ -26,7 +26,7 @@ func NewWithService(svc cloud.Service) *App {
 	return &App{svc: svc, pane: newServerPane(), loading: true}
 }
 
-func (a *App) Init() tea.Cmd { return a.loadServersCmd() }
+func (a *App) Init() tea.Cmd { return tea.Batch(a.loadServersCmd(), a.loadIPsCmd()) }
 
 func (a *App) loadServersCmd() tea.Cmd {
 	return func() tea.Msg {
@@ -35,6 +35,18 @@ func (a *App) loadServersCmd() tea.Cmd {
 			return errMsg{err: err}
 		}
 		return serversLoadedMsg{servers: servers}
+	}
+}
+
+// loadIPsCmd fetches all IP addresses in one request; failures are silent (the
+// PUBLIC IP column simply stays unpopulated rather than erroring the dashboard).
+func (a *App) loadIPsCmd() tea.Cmd {
+	return func() tea.Msg {
+		ips, err := a.svc.ListIPAddresses(context.Background())
+		if err != nil {
+			return ipsLoadedMsg{ips: nil}
+		}
+		return ipsLoadedMsg{ips: ips}
 	}
 }
 
@@ -78,6 +90,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.status = ""
 		a.pane.setServers(msg.servers)
 		a.resize()
+		return a, nil
+
+	case ipsLoadedMsg:
+		a.pane.setIPs(publicIPv4ByServer(msg.ips))
 		return a, nil
 
 	case serverDetailMsg:
@@ -134,6 +150,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a *App) resize() {
 	listW := a.width / 2
 	bodyH := a.height - 2
+	// Show the PUBLIC IP column only when the list pane is wide enough for all
+	// columns (HOSTNAME+PLAN+ZONE+STATE+PUBLIC IP ≈ 76 plus cell padding).
+	a.pane.setShowIP(listW >= 80)
 	a.pane.list.SetWidth(listW)
 	a.pane.list.SetHeight(bodyH)
 	a.pane.detail.SetWidth(a.width - listW - 1)
