@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	charm.land/bubbletea/v2 v2.0.6
+	charm.land/lipgloss/v2 v2.0.3
 	github.com/UpCloudLtd/upcloud-go-api/v8 v8.37.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
