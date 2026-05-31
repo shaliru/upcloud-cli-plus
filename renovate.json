@@ -1,0 +1,19 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "description": "Auto-merge green minor/patch bumps for Go modules",
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true,
+      "automergeType": "branch"
+    },
+    {
+      "description": "Group and surface the UpCloud SDK explicitly",
+      "matchPackageNames": ["github.com/UpCloudLtd/upcloud-go-api/v8"],
+      "groupName": "upcloud-go-api SDK"
+    }
+  ]
+}
