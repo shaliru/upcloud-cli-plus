@@ -159,6 +159,26 @@ func TestApp_NetworkTabShowsLoadedNetworks(t *testing.T) {
 	assert.Contains(t, app.viewString(), "net-a")
 }
 
+func TestApp_StorageSubCategorySwitch(t *testing.T) {
+	app := NewWithService(&cloud.Fake{})
+	app.width, app.height = 160, 30
+	app.resize()
+	app.active = 1 // storage tab
+	_, _ = app.Update(storageLoadedMsg{items: []upcloud.Storage{
+		{UUID: "d1", Title: "disk-a", Type: upcloud.StorageTypeNormal, Access: upcloud.StorageAccessPrivate},
+		{UUID: "b1", Title: "backup-a", Type: upcloud.StorageTypeBackup, Access: upcloud.StorageAccessPrivate},
+	}})
+	out := app.viewString()
+	assert.Contains(t, out, "Devices")
+	assert.Contains(t, out, "disk-a")
+	assert.NotContains(t, out, "backup-a")
+
+	_, _ = app.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+	out = app.viewString()
+	assert.Contains(t, out, "backup-a")
+	assert.NotContains(t, out, "disk-a")
+}
+
 type errorString string
 
 func (e errorString) Error() string { return string(e) }

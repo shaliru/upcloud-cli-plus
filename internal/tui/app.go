@@ -171,7 +171,14 @@ func (a *App) updateServers(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) updateStorage(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if msg.String() == "enter" {
+	switch msg.String() {
+	case "]":
+		a.storage.nextSub()
+		return a, nil
+	case "[":
+		a.storage.prevSub()
+		return a, nil
+	case "enter":
 		if uuid, ok := a.storage.selectedUUID(); ok {
 			return a, a.loadStorageDetailCmd(uuid)
 		}
@@ -348,7 +355,11 @@ func (a *App) resize() {
 	a.pane.list.SetHeight(bodyH)
 	a.pane.detail.SetWidth(a.detailWidth())
 	a.pane.detail.SetHeight(bodyH)
-	a.storage.setSize(a.width, bodyH)
+	storageBodyH := bodyH - 1 // reserve a row for the storage sub-category bar
+	if storageBodyH < 1 {
+		storageBodyH = 1
+	}
+	a.storage.setSize(a.width, storageBodyH)
 	a.network.setSize(a.width, bodyH)
 }
 
@@ -370,14 +381,14 @@ func (a *App) viewString() string {
 	case 0:
 		body = lipglossJoin(a.pane.list.View(), a.pane.detail.View())
 	case 1:
-		body = a.storage.view()
+		body = a.storage.subBar() + "\n" + a.storage.view()
 	default:
 		body = a.network.view()
 	}
 
 	status := a.status
 	if status == "" {
-		status = "tab switch · ↑↓ select · enter details · s/x/r start/stop/restart · q quit"
+		status = "tab switch · [ ] storage category · ↑↓ select · enter details · s/x/r start/stop/restart · q quit"
 	}
 	status = truncate(status, a.width-2)
 
