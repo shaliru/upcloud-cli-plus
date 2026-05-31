@@ -66,12 +66,13 @@ func WriteTable(w io.Writer, cols []Column, rows [][]string, noun string) error 
 	}
 	b.WriteString(strings.Join(headerCells, "  ") + "\n")
 
-	total := 0
-	for _, wd := range widths {
-		total += wd
+	// Separator: a dash run under each column, joined by the column gap, so the
+	// rule is broken into per-column segments aligned with the data rows.
+	segs := make([]string, len(cols))
+	for i := range cols {
+		segs[i] = strings.Repeat("─", widths[i])
 	}
-	total += 2 * (len(cols) - 1)
-	b.WriteString(dim(strings.Repeat("─", total)) + "\n")
+	b.WriteString(dim(strings.Join(segs, "  ")) + "\n")
 
 	for r := range plain {
 		cells := make([]string, len(cols))

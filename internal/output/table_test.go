@@ -51,3 +51,14 @@ func TestWriteTable_Pluralisation(t *testing.T) {
 	assert.Contains(t, buf.String(), "1 server\n")
 	assert.NotContains(t, buf.String(), "1 servers")
 }
+
+func TestWriteTable_BrokenSeparator(t *testing.T) {
+	var buf bytes.Buffer
+	cols := []Column{{Header: "AAAA"}, {Header: "BB"}}
+	rows := [][]string{{"aaaa", "bb"}}
+	require.NoError(t, WriteTable(&buf, cols, rows, "row"))
+	lines := strings.Split(buf.String(), "\n")
+	sep := lines[1] // header, [separator], row, footer
+	assert.Contains(t, sep, "────  ──", "per-column segments with a gap")
+	assert.NotContains(t, sep, "──────", "no single unbroken run spanning columns")
+}
