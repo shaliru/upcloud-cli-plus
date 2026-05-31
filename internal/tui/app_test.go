@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -33,9 +34,21 @@ func TestApp_PublicIPColumnPopulates(t *testing.T) {
 
 func TestApp_NarrowHidesIPColumn(t *testing.T) {
 	app := NewWithService(&cloud.Fake{})
-	app.width, app.height = 80, 30 // listW=40 < 80 → no IP column
+	app.width, app.height = 80, 30 // total < 118 → no IP column
 	app.resize()
 	assert.False(t, app.pane.showIP)
+}
+
+func TestApp_StatusBarTruncatedToWidth(t *testing.T) {
+	app := NewWithService(&cloud.Fake{})
+	app.width, app.height = 120, 30
+	app.resize()
+	longErr := errorString("The operation is not allowed while the server 00187417-b22d-4850-99f0-6b0bebb8d911 is in state 'started'. (type=SERVER_STATE_ILLEGAL, status=409)")
+	_, _ = app.Update(errMsg{err: longErr})
+	lines := strings.Split(app.viewString(), "\n")
+	statusLine := lines[len(lines)-1] // status bar is the last line
+	assert.LessOrEqual(t, lipglossWidth(statusLine), 120, "status bar overflows width: %q", statusLine)
+	assert.Contains(t, statusLine, "not allowed", "status still shows the start of the error")
 }
 
 func TestApp_ServersLoadedPopulatesTable(t *testing.T) {

@@ -169,10 +169,9 @@ func (a *App) listWidth() int {
 	if a.showIPColumn() {
 		w = listWidthWithIP
 	}
-	if w > a.width-minDetailWidth { // narrow terminal: don't starve the detail pane
-		w = a.width - minDetailWidth
-	}
-	if w < 1 {
+	// The list must keep its natural column width or the table overflows; on a
+	// pathologically narrow terminal, clamp to the full width instead.
+	if w > a.width {
 		w = a.width
 	}
 	return w
@@ -204,6 +203,9 @@ func (a *App) viewString() string {
 	if status == "" {
 		status = "↑↓ select · enter details · s/x/r start/stop/restart · q quit"
 	}
+	// StatusBar has 1 col of padding each side; truncate so the line never
+	// overflows the terminal width.
+	status = truncate(status, a.width-2)
 	return body + "\n" + styles.StatusBar.Render(status)
 }
 
