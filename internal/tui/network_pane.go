@@ -6,6 +6,7 @@ import (
 	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/viewport"
 	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud"
+	"github.com/shaliru/upcloud-cli-plus/internal/cloud"
 	"github.com/shaliru/upcloud-cli-plus/internal/tui/styles"
 )
 
@@ -14,12 +15,13 @@ const networkListWidth = 52 // NAME+TYPE+ZONE + cell padding
 // networkPane is a read-only list + detail pane for networks. Detail renders
 // directly from the loaded list item (GetNetworks already returns full objects).
 type networkPane struct {
-	list   table.Model
-	detail viewport.Model
-	items  []upcloud.Network
-	loaded bool
-	width  int
-	height int
+	list    table.Model
+	detail  viewport.Model
+	all     []upcloud.Network
+	showAll bool
+	loaded  bool
+	width   int
+	height  int
 }
 
 func networkColumns() []table.Column {
@@ -44,17 +46,44 @@ func newNetworkPane() networkPane {
 }
 
 func (p *networkPane) setItems(items []upcloud.Network) {
-	p.items = items
+	p.all = items
 	p.loaded = true
-	p.list.SetRows(networkRows(items))
+	p.refreshRows()
+}
+
+// visible returns the networks shown for the current mode.
+func (p *networkPane) visible() []upcloud.Network {
+	mode := "private"
+	if p.showAll {
+		mode = "all"
+	}
+	return cloud.FilterNetworksByType(p.all, mode)
+}
+
+func (p *networkPane) refreshRows() {
+	p.list.SetRows(networkRows(p.visible()))
+	if len(p.visible()) > 0 {
+		p.list.SetCursor(0)
+	}
+}
+
+func (p *networkPane) toggleAll() { p.showAll = !p.showAll; p.refreshRows() }
+
+// indicator is the one-line mode label shown above the list.
+func (p *networkPane) indicator() string {
+	if p.showAll {
+		return styles.Muted.Render("Showing: all networks (incl. UpCloud infra) · a: private")
+	}
+	return styles.Muted.Render("Showing: private networks · a: all")
 }
 
 func (p *networkPane) selectedItem() (upcloud.Network, bool) {
+	items := p.visible()
 	cur := p.list.Cursor()
-	if cur < 0 || cur >= len(p.items) {
+	if cur < 0 || cur >= len(items) {
 		return upcloud.Network{}, false
 	}
-	return p.items[cur], true
+	return items[cur], true
 }
 
 // showSelectedDetail renders the highlighted network into the detail viewport.
@@ -86,7 +115,11 @@ func (p *networkPane) detailWidth() int {
 }
 
 func (p *networkPane) view() string {
-	return lipglossJoin(p.list.View(), p.detail.View())
+	left := p.list.View()
+	if len(p.visible()) == 0 {
+		left = styles.Muted.Render("  (none)")
+	}
+	return lipglossJoin(left, p.detail.View())
 }
 
 // renderNetworkDetail renders network details (read-only), width-bounded.

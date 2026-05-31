@@ -30,8 +30,39 @@ func TestRenderNetworkDetail(t *testing.T) {
 
 func TestNetworkPane_SelectedItem(t *testing.T) {
 	p := newNetworkPane()
-	p.setItems([]upcloud.Network{{UUID: "n1", Name: "net-a"}})
+	p.setItems([]upcloud.Network{{UUID: "n1", Name: "net-a", Type: upcloud.NetworkTypePrivate}})
 	item, ok := p.selectedItem()
 	require.True(t, ok)
 	assert.Equal(t, "n1", item.UUID)
+}
+
+func mixedFakeNetworks() []upcloud.Network {
+	return []upcloud.Network{
+		{UUID: "n1", Name: "net-a", Type: upcloud.NetworkTypePrivate, Zone: "sg-sin1"},
+		{UUID: "pub1", Name: "Public sg-sin1", Type: upcloud.NetworkTypePublic, Zone: "sg-sin1"},
+	}
+}
+
+func TestNetworkPane_DefaultsToPrivateAndToggles(t *testing.T) {
+	p := newNetworkPane()
+	p.setSize(120, 20)
+	p.setItems(mixedFakeNetworks())
+
+	item, ok := p.selectedItem()
+	require.True(t, ok)
+	assert.Equal(t, "n1", item.UUID)
+	assert.Len(t, p.visible(), 1)
+
+	p.toggleAll()
+	assert.Len(t, p.visible(), 2)
+
+	p.toggleAll()
+	assert.Len(t, p.visible(), 1)
+}
+
+func TestNetworkPane_IndicatorMentionsMode(t *testing.T) {
+	p := newNetworkPane()
+	assert.Contains(t, p.indicator(), "private")
+	p.toggleAll()
+	assert.Contains(t, p.indicator(), "all")
 }

@@ -154,7 +154,7 @@ func TestApp_NetworkTabShowsLoadedNetworks(t *testing.T) {
 	app := NewWithService(&cloud.Fake{})
 	app.width, app.height = 160, 30
 	app.resize()
-	_, _ = app.Update(networksLoadedMsg{items: []upcloud.Network{{UUID: "n1", Name: "net-a"}}})
+	_, _ = app.Update(networksLoadedMsg{items: []upcloud.Network{{UUID: "n1", Name: "net-a", Type: upcloud.NetworkTypePrivate}}})
 	app.active = 2
 	assert.Contains(t, app.viewString(), "net-a")
 }
