@@ -12,6 +12,7 @@ import (
 	"github.com/shaliru/upcloud-cli-plus/internal/cli/server"
 	"github.com/shaliru/upcloud-cli-plus/internal/cloud"
 	"github.com/shaliru/upcloud-cli-plus/internal/config"
+	"github.com/shaliru/upcloud-cli-plus/internal/tui"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -42,11 +43,8 @@ func defaultFactory(ctx context.Context) (cloud.Service, error) {
 	return cloud.New(service.New(c)), nil
 }
 
-// launchTUI is replaced in Plan 2 by the real Bubble Tea program. For now it
-// reports that the dashboard is not yet built.
 func launchTUI(ctx context.Context, factory server.ServiceFactory, resource string) error {
-	fmt.Fprintln(os.Stderr, "The interactive dashboard arrives in the next milestone (Plan 2). Use the CLI subcommands for now.")
-	return nil
+	return tui.Run(ctx, tui.ServiceFactory(factory), resource)
 }
 
 func newRootCommand(factory server.ServiceFactory) *cobra.Command {

@@ -161,5 +161,7 @@ func (a *App) viewString() string {
 }
 
 func (a *App) View() tea.View {
-	return tea.NewView(a.viewString())
+	v := tea.NewView(a.viewString())
+	v.AltScreen = true
+	return v
 }
