@@ -9,7 +9,9 @@ import (
 
 	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/client"
 	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/service"
+	"github.com/shaliru/upcloud-cli-plus/internal/cli/network"
 	"github.com/shaliru/upcloud-cli-plus/internal/cli/server"
+	"github.com/shaliru/upcloud-cli-plus/internal/cli/storage"
 	"github.com/shaliru/upcloud-cli-plus/internal/cloud"
 	"github.com/shaliru/upcloud-cli-plus/internal/config"
 	"github.com/shaliru/upcloud-cli-plus/internal/tui"
@@ -55,6 +57,8 @@ func newRootCommand(factory server.ServiceFactory) *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.AddCommand(server.NewCommand(factory))
+	root.AddCommand(storage.NewCommand(storage.ServiceFactory(factory)))
+	root.AddCommand(network.NewCommand(network.ServiceFactory(factory)))
 	return root
 }
 
