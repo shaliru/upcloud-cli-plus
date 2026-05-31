@@ -9,12 +9,14 @@ import (
 )
 
 var (
-	ColorAccent color.Color = lipgloss.Color(palette.Accent)
-	ColorOK     color.Color = lipgloss.Color(palette.OK)
-	ColorWarn   color.Color = lipgloss.Color(palette.Warn)
-	ColorErr    color.Color = lipgloss.Color(palette.Err)
-	ColorMuted  color.Color = lipgloss.Color(palette.Muted)
-	ColorBorder color.Color = lipgloss.Color(palette.Border)
+	ColorAccent    color.Color = lipgloss.Color(palette.Accent)
+	ColorBlue      color.Color = lipgloss.Color(palette.Blue)
+	ColorOK        color.Color = lipgloss.Color(palette.OK)
+	ColorWarn      color.Color = lipgloss.Color(palette.Warn)
+	ColorErr       color.Color = lipgloss.Color(palette.Err)
+	ColorMuted     color.Color = lipgloss.Color(palette.Muted)
+	ColorBorder    color.Color = lipgloss.Color(palette.Border)
+	ColorSelection color.Color = lipgloss.Color(palette.Selection)
 )
 
 var (
@@ -32,10 +34,10 @@ var (
 			BorderForeground(ColorAccent)
 )
 
-// StateColor returns the colour for a server state string.
+// StateColor returns the colour for a resource state string.
 func StateColor(state string) color.Color {
 	switch state {
-	case "started":
+	case "started", "online", "running":
 		return ColorOK
 	case "stopped", "error":
 		return ColorErr

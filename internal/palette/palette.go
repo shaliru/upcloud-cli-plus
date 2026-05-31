@@ -9,5 +9,6 @@ const (
 	Warn   = "#f9e2af" // yellow — transitional states
 	Err    = "#f38ba8" // red — bad states
 	Muted  = "#6c7086" // grey — secondary text, separators, dim
-	Border = "#313244"
+	Border    = "#313244"
+	Selection = "#45475a" // selected-row highlight bar
 )
