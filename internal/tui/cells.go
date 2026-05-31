@@ -26,8 +26,3 @@ func tuiTableStyles() table.Styles {
 	s.Selected = lipgloss.NewStyle().Background(styles.ColorSelection).Bold(true)
 	return s
 }
-
-// defaultTableStyles returns the unmodified default table styles for comparison.
-func defaultTableStyles() table.Styles {
-	return table.DefaultStyles()
-}
