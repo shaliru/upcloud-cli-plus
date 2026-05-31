@@ -95,7 +95,7 @@ func (p *storagePane) listView() string {
 	if len(p.active()) == 0 {
 		return styles.Muted.Render("  (none)")
 	}
-	return p.list.View()
+	return withHeaderRule(p.list.View(), storageColumns())
 }
 
 func (p *storagePane) detailView() string { return p.detail.View() }

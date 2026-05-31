@@ -87,7 +87,7 @@ func (p *networkPane) listView() string {
 	if len(p.visible()) == 0 {
 		return styles.Muted.Render("  (none)")
 	}
-	return p.list.View()
+	return withHeaderRule(p.list.View(), networkColumns())
 }
 
 func (p *networkPane) detailView() string { return p.detail.View() }

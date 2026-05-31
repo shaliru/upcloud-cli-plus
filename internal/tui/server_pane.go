@@ -46,5 +46,5 @@ func (p *serverPane) selectedUUID() string {
 	return p.servers[cur].UUID
 }
 
-func (p *serverPane) listView() string   { return p.list.View() }
+func (p *serverPane) listView() string   { return withHeaderRule(p.list.View(), serverColumns()) }
 func (p *serverPane) detailView() string { return p.detail.View() }
