@@ -49,3 +49,5 @@ dist/
 
 # Local development settings
 .claude/
+# Superpowers brainstorming companion
+.superpowers/

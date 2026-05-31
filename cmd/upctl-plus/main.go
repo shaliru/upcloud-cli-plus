@@ -1,7 +1,11 @@
 package main
 
-import "fmt"
+import (
+	"os"
+
+	"github.com/shaliru/upcloud-cli-plus/internal/cli"
+)
 
 func main() {
-	fmt.Println("upctl-plus")
+	os.Exit(cli.Execute())
 }
