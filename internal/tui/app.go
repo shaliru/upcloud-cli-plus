@@ -41,6 +41,18 @@ func NewWithService(svc cloud.Service) *App {
 	}
 }
 
+// setStartTab selects the initial tab from a resource name (e.g. "storage").
+func (a *App) setStartTab(resource string) {
+	switch resource {
+	case "storage":
+		a.active = 1
+	case "network":
+		a.active = 2
+	default:
+		a.active = 0
+	}
+}
+
 func (a *App) Init() tea.Cmd {
 	return tea.Batch(a.loadServersCmd(), a.loadIPsCmd(), a.loadStorageCmd(), a.loadNetworksCmd())
 }

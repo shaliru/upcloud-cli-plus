@@ -115,6 +115,18 @@ func TestApp_TabCyclesActive(t *testing.T) {
 	assert.Equal(t, 0, app.active, "wraps around")
 }
 
+func TestApp_StartTabFromResource(t *testing.T) {
+	app := NewWithService(&cloud.Fake{})
+	app.setStartTab("storage")
+	assert.Equal(t, 1, app.active)
+	app.setStartTab("network")
+	assert.Equal(t, 2, app.active)
+	app.setStartTab("server")
+	assert.Equal(t, 0, app.active)
+	app.setStartTab("")
+	assert.Equal(t, 0, app.active)
+}
+
 func TestApp_TabClearsPendingConfirm(t *testing.T) {
 	f := &cloud.Fake{Servers: []upcloud.Server{{UUID: "u1", Hostname: "web-sg-1", State: "started"}}}
 	app := NewWithService(f)
