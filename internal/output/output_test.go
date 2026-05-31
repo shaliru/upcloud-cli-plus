@@ -39,3 +39,25 @@ func TestYAML(t *testing.T) {
 	require.NoError(t, YAML(&buf, sampleServers()))
 	assert.Contains(t, buf.String(), "hostname: web-sg-1")
 }
+
+func TestStoragesTable(t *testing.T) {
+	var buf bytes.Buffer
+	require.NoError(t, StoragesTable(&buf, []upcloud.Storage{
+		{UUID: "s1", Title: "disk-a", Size: 25, Zone: "sg-sin1", State: "online", Type: "normal", Tier: "maxiops"},
+	}))
+	out := buf.String()
+	assert.Contains(t, out, "TITLE")
+	assert.Contains(t, out, "disk-a")
+	assert.Contains(t, out, "25")
+}
+
+func TestNetworksTable(t *testing.T) {
+	var buf bytes.Buffer
+	require.NoError(t, NetworksTable(&buf, []upcloud.Network{
+		{UUID: "n1", Name: "net-a", Type: "private", Zone: "sg-sin1"},
+	}))
+	out := buf.String()
+	assert.Contains(t, out, "NAME")
+	assert.Contains(t, out, "net-a")
+	assert.Contains(t, out, "private")
+}
