@@ -12,7 +12,7 @@ import (
 func TestNetworkRows(t *testing.T) {
 	rows := networkRows([]upcloud.Network{{UUID: "n1", Name: "net-a", Type: "private", Zone: "sg-sin1"}})
 	require.Len(t, rows, 1)
-	assert.Equal(t, "n1", rows[0][0], "UUID is first column")
+	assert.Contains(t, rows[0][0], "n1", "UUID is first column")
 	assert.Equal(t, "net-a", rows[0][1])
 }
 

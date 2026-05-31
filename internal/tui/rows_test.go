@@ -15,11 +15,11 @@ func TestServerRows(t *testing.T) {
 	}
 	rows := serverRows(servers, nil)
 	require.Len(t, rows, 2)
-	assert.Equal(t, "u1", rows[0][0], "UUID is first column")
+	assert.Contains(t, rows[0][0], "u1", "UUID is first column")
 	assert.Equal(t, "web-sg-1", rows[0][1])
-	assert.Equal(t, "● started", rows[0][4], "STATE cell uses dotState")
+	assert.Contains(t, rows[0][4], "● started", "STATE cell is coloured")
 	assert.Equal(t, "—", rows[0][5], "no IP renders as em dash")
-	assert.Equal(t, "u2", rows[1][0])
+	assert.Contains(t, rows[1][0], "u2")
 	assert.Len(t, rows[0], 6)
 }
 
@@ -35,11 +35,6 @@ func TestServerRows_WithIP(t *testing.T) {
 	assert.Equal(t, "—", rows[1][5], "unknown IP renders as em dash")
 }
 
-func TestDotState(t *testing.T) {
-	assert.Equal(t, "● started", dotState("started"))
-	assert.Equal(t, "● stopped", dotState("stopped"))
-	assert.Equal(t, "", dotState(""))
-}
 
 func TestPublicIPv4ByServer(t *testing.T) {
 	ips := []upcloud.IPAddress{

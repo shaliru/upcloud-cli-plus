@@ -38,13 +38,13 @@ func storageColumns() []table.Column {
 func storageRows(items []upcloud.Storage) []table.Row {
 	rows := make([]table.Row, 0, len(items))
 	for _, s := range items {
-		rows = append(rows, table.Row{s.UUID, s.Title, fmt.Sprintf("%d", s.Size), s.Zone, s.Tier, s.Type, dotState(s.State)})
+		rows = append(rows, table.Row{uuidCell(s.UUID), s.Title, fmt.Sprintf("%d", s.Size), s.Zone, s.Tier, s.Type, stateCell(s.State)})
 	}
 	return rows
 }
 
 func newStoragePane() storagePane {
-	t := table.New(table.WithColumns(storageColumns()), table.WithFocused(true), table.WithHeight(10))
+	t := table.New(table.WithColumns(storageColumns()), table.WithFocused(true), table.WithHeight(10), table.WithStyles(tuiTableStyles()))
 	return storagePane{list: t, detail: viewport.New()}
 }
 

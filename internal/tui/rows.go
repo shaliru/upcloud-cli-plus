@@ -24,17 +24,9 @@ func serverRows(servers []upcloud.Server, ipByUUID map[string]string) []table.Ro
 		if ip == "" {
 			ip = "—"
 		}
-		rows = append(rows, table.Row{s.UUID, s.Hostname, s.Plan, s.Zone, dotState(s.State), ip})
+		rows = append(rows, table.Row{uuidCell(s.UUID), s.Hostname, s.Plan, s.Zone, stateCell(s.State), ip})
 	}
 	return rows
-}
-
-// dotState prefixes a non-empty state with a ● dot for STATE columns.
-func dotState(s string) string {
-	if s == "" {
-		return ""
-	}
-	return "● " + s
 }
 
 // publicIPv4ByServer builds a server-UUID → public IPv4 map from a flat IP list.

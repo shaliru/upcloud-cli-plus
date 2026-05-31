@@ -32,13 +32,13 @@ func networkColumns() []table.Column {
 func networkRows(items []upcloud.Network) []table.Row {
 	rows := make([]table.Row, 0, len(items))
 	for _, n := range items {
-		rows = append(rows, table.Row{n.UUID, n.Name, n.Type, n.Zone})
+		rows = append(rows, table.Row{uuidCell(n.UUID), n.Name, n.Type, n.Zone})
 	}
 	return rows
 }
 
 func newNetworkPane() networkPane {
-	t := table.New(table.WithColumns(networkColumns()), table.WithFocused(true), table.WithHeight(10))
+	t := table.New(table.WithColumns(networkColumns()), table.WithFocused(true), table.WithHeight(10), table.WithStyles(tuiTableStyles()))
 	return networkPane{list: t, detail: viewport.New()}
 }
 

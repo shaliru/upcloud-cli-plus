@@ -14,8 +14,9 @@ func TestStorageRows(t *testing.T) {
 		{UUID: "s1", Title: "disk-a", Size: 25, Zone: "sg-sin1", Tier: "maxiops", State: "online"},
 	})
 	require.Len(t, rows, 1)
-	assert.Equal(t, "s1", rows[0][0], "UUID is first column")
+	assert.Contains(t, rows[0][0], "s1", "UUID is first column")
 	assert.Equal(t, "disk-a", rows[0][1])
+	assert.Contains(t, rows[0][6], "● online", "STATE cell is coloured")
 }
 
 func TestRenderStorageDetail(t *testing.T) {

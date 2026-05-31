@@ -15,7 +15,7 @@ type serverPane struct {
 }
 
 func newServerPane() serverPane {
-	t := table.New(table.WithColumns(serverColumns()), table.WithFocused(true), table.WithHeight(10))
+	t := table.New(table.WithColumns(serverColumns()), table.WithFocused(true), table.WithHeight(10), table.WithStyles(tuiTableStyles()))
 	return serverPane{list: t, detail: viewport.New()}
 }
 
