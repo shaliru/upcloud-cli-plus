@@ -3,14 +3,15 @@
 [![Based on UpCloud CLI](https://img.shields.io/badge/based%20on-UpCloud%20CLI-blue)](https://github.com/UpCloudLtd/upcloud-cli)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
-`upctl-plus` is an enhanced command-line interface for [UpCloud](https://upcloud.com/), built on the official [UpCloud Go SDK](https://github.com/UpCloudLtd/upcloud-go-api). It pairs a scriptable CLI with an interactive terminal **dashboard** (a TUI in the spirit of k9s/lazygit) for managing your servers.
+`upctl-plus` is an enhanced command-line interface for [UpCloud](https://upcloud.com/), built on the official [UpCloud Go SDK](https://github.com/UpCloudLtd/upcloud-go-api). It pairs a scriptable CLI with an interactive terminal **dashboard** (a TUI in the spirit of k9s/lazygit) for managing your servers, storage, and networks.
 
-> **Status:** v1 focuses on **servers** (browse + lifecycle). Storage and networks are scriptable foundations today and are next in line for the dashboard.
+> **Status:** read + server lifecycle across **servers, storage, and networks**, in both the CLI and the dashboard. Resource creation/deletion and managed services are not in yet (see [Roadmap](#roadmap)).
 
 ## Highlights
 
-- **Interactive dashboard** — run `upctl-plus` with no arguments to open a master-detail TUI: a server list (with public IPv4), a detail pane (overview, storage, network), and lifecycle actions with confirmation.
-- **Scriptable CLI** — every action is also a plain subcommand with `table`/`json`/`yaml` output, safe to pipe and automate. The TUI never hijacks a non-interactive (piped) invocation.
+- **Interactive dashboard** — run `upctl-plus` with no arguments. Full-width lists with a `Servers │ Storage │ Networks` tab bar; press **Enter** to drill into a full-screen detail, **Esc** to return. Colour-coded (blue UUIDs, green/red `●` state), with a highlighted selected row.
+- **Scriptable CLI** — every view is also a plain subcommand with `table`/`json`/`yaml` output, safe to pipe and automate. The dashboard never hijacks a non-interactive (piped) invocation.
+- **Sensible defaults that cut the noise** — `storage list` shows your real devices (not UpCloud's public templates); `network list` shows your private networks (not the per-zone public/utility infrastructure). The full set is one flag away.
 - **Token-first auth** — uses an UpCloud API token by default, and is compatible with your existing `upctl` configuration.
 - **Single static binary** — no runtime dependencies.
 
@@ -62,17 +63,22 @@ If you already use `upctl`, your existing configuration works as-is.
 ### Interactive dashboard
 
 ```bash
-upctl-plus              # open the dashboard (lands on the server list)
-upctl-plus server list -i   # open the dashboard, deep-linked to servers
+upctl-plus                  # open the dashboard (lands on the Servers tab)
+upctl-plus storage list -i  # open the dashboard, deep-linked to the Storage tab
+upctl-plus network list -i  # …deep-linked to Networks
 ```
 
 Keys:
 
 | Key | Action |
 |-----|--------|
+| `Tab` / `Shift+Tab` | switch resource tab (Servers / Storage / Networks) |
 | `↑` / `↓` | move the selection |
-| `enter` | load the selected server's details |
-| `s` / `x` / `r` | start / stop / restart (asks `y`/`n` to confirm) |
+| `Enter` | drill into the selected item's full-screen detail |
+| `Esc` | return from detail to the list (`↑↓` scrolls a detail view) |
+| `s` / `x` / `r` | start / stop / restart the selected server (asks `y`/`n`) — Servers tab |
+| `[` / `]` | switch storage sub-category: Devices / Backups / Custom images — Storage tab |
+| `a` | toggle private ⇄ all networks (incl. UpCloud infra) — Networks tab |
 | `q` | quit |
 
 A long error stays pinned (in red) at the bottom until you press a key.
@@ -80,14 +86,27 @@ A long error stays pinned (in red) at the bottom until you press a key.
 ### CLI
 
 ```bash
-upctl-plus server list                  # table of all servers
-upctl-plus server list -o json | jq     # scriptable JSON
-upctl-plus server show <hostname|uuid>  # details (resolves hostname or title)
-upctl-plus server restart web-sg-1      # act by hostname, UUID, or title
-upctl-plus server stop web-sg-1 db-sg-1 # act on several at once
+# Servers
+upctl-plus server list                   # table of all servers
+upctl-plus server list -o json | jq      # scriptable JSON
+upctl-plus server show <hostname|uuid>   # details (resolves hostname or title)
+upctl-plus server restart web-sg-1       # act by hostname, UUID, or title
+upctl-plus server stop web-sg-1 db-sg-1  # act on several at once
+
+# Storage (read-only) — default shows your devices; use --type for more
+upctl-plus storage list                  # devices only
+upctl-plus storage list --type backups   # backups | images | all
+upctl-plus storage show <title|uuid>
+
+# Networks (read-only) — default shows your private SDN networks
+upctl-plus network list                  # private only
+upctl-plus network list --type all       # include UpCloud public/utility nets
+upctl-plus network show <name|uuid>
 ```
 
-Servers can be referenced by **UUID, hostname, or title**.
+Resources can be referenced by **UUID, or by their name/hostname/title**.
+
+**Colour:** table output is coloured on a terminal and plain when piped. Control it with `--color auto|always|never` (default `auto`); `NO_COLOR` is also honoured. `--color always` keeps colour through e.g. `| less -R`.
 
 ## Exit codes
 
@@ -97,6 +116,13 @@ Servers can be referenced by **UUID, hostname, or title**.
 | `1`–`99` | Number of failed operations (e.g. 1 of 3 restarts failed) |
 | `100`+ | Other errors (missing flag, authentication failure, etc.) |
 
+## Roadmap
+
+- [ ] **Dashboard niceties** — in-list `/` filter, a sort toggle, and cross-links (jump from a server's detail to its attached storage/network).
+- [ ] Resource **create / delete / modify** (including a guided server-create wizard).
+- [ ] Managed services — databases, Kubernetes, load balancers, object storage.
+- [ ] **Firewall rules** in the server detail view.
+
 ## Development
 
 ```bash
@@ -105,7 +131,7 @@ go vet ./...      # static checks
 go build ./...    # build everything
 ```
 
-The codebase is layered so the CLI and the TUI are thin front-ends over one shared service layer (`internal/cloud`): `internal/cli` (Cobra commands), `internal/tui` (Bubble Tea dashboard), `internal/output` (rendering), `internal/config` (credentials).
+The codebase is layered so the CLI and the TUI are thin front-ends over one shared service layer (`internal/cloud`): `internal/cli` (Cobra commands), `internal/tui` (Bubble Tea dashboard), `internal/output` (CLI rendering), `internal/palette` (shared colours), `internal/config` (credentials).
 
 Dependencies are kept current automatically via [Renovate](./renovate.json) (minor/patch bumps auto-merge when CI is green).
 
