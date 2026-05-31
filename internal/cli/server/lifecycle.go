@@ -55,7 +55,7 @@ func NewLifecycleCommand(factory ServiceFactory, action string) *cobra.Command {
 					failures++
 					continue
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%s %sed (%s)\n", ref, action, uuid)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s: %s ok (%s)\n", ref, action, uuid)
 			}
 			if failures > 0 {
 				return FailureCountError{Count: failures}

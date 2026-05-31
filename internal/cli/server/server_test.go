@@ -79,3 +79,21 @@ func TestLifecycleCommand_ReportsFailures(t *testing.T) {
 	require.ErrorAs(t, err, &fc)
 	assert.Equal(t, 1, fc.Count)
 }
+
+func TestLifecycleCommand_PartialFailureContinues(t *testing.T) {
+	f := testFake() // has web-sg-1 (u1) only
+	cmd := NewLifecycleCommand(func(context.Context) (cloud.Service, error) { return f, nil }, "restart")
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"web-sg-1", "nonexistent"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	var fc FailureCountError
+	require.ErrorAs(t, err, &fc)
+	// The valid server is acted on despite the second arg failing, and only the
+	// failure is counted.
+	assert.Equal(t, []string{"u1"}, f.Restarted)
+	assert.Equal(t, 1, fc.Count)
+}
