@@ -1,35 +1,33 @@
-# UpCloud CLI Plus - upctl-plus
+# UpCloud CLI Plus — `upctl-plus`
 
-[![Original upcloud-cli](https://img.shields.io/badge/based%20on-UpCloud%20CLI-blue)](https://github.com/UpCloudLtd/upcloud-cli)
+[![Based on UpCloud CLI](https://img.shields.io/badge/based%20on-UpCloud%20CLI-blue)](https://github.com/UpCloudLtd/upcloud-cli)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
-`upctl-plus` is an enhanced command-line interface to [UpCloud](https://upcloud.com/) services with interactive features. It provides all the functionality of the original UpCloud CLI plus interactive resource selection, visual management, and streamlined workflows.
+`upctl-plus` is an enhanced command-line interface for [UpCloud](https://upcloud.com/), built on the official [UpCloud Go SDK](https://github.com/UpCloudLtd/upcloud-go-api). It pairs a scriptable CLI with an interactive terminal **dashboard** (a TUI in the spirit of k9s/lazygit) for managing your servers.
 
-## What's New
+> **Status:** v1 focuses on **servers** (browse + lifecycle). Storage and networks are scriptable foundations today and are next in line for the dashboard.
 
-- **Interactive Server Selection** - Navigate servers with arrow keys instead of copying UUIDs
-- **Columnar Display** - Clean, aligned tables showing server info including public IP addresses
-- **Keyboard Navigation** - Use arrow keys, search with `/`, and select with Enter
-- **Context-Aware Actions** - Action menus that adapt based on server state
-- **Backward Compatible** - All original `upctl` functionality preserved
+## Highlights
+
+- **Interactive dashboard** — run `upctl-plus` with no arguments to open a master-detail TUI: a server list (with public IPv4), a detail pane (overview, storage, network), and lifecycle actions with confirmation.
+- **Scriptable CLI** — every action is also a plain subcommand with `table`/`json`/`yaml` output, safe to pipe and automate. The TUI never hijacks a non-interactive (piped) invocation.
+- **Token-first auth** — uses an UpCloud API token by default, and is compatible with your existing `upctl` configuration.
+- **Single static binary** — no runtime dependencies.
 
 ## Installation
 
-### Option 1: Download and Build (Recommended)
+### Build from source (recommended for now)
 
 ```bash
-# Clone the repository
 git clone https://github.com/shaliru/upcloud-cli-plus.git
 cd upcloud-cli-plus
-
-# Build the binary
-make build
-
-# The binary will be available at ./bin/upctl-plus
+go build -o bin/upctl-plus ./cmd/upctl-plus
 ./bin/upctl-plus --help
 ```
 
-### Option 2: Direct Go Install
+Requires Go 1.24+.
+
+### go install
 
 ```bash
 go install github.com/shaliru/upcloud-cli-plus/cmd/upctl-plus@latest
@@ -37,125 +35,80 @@ go install github.com/shaliru/upcloud-cli-plus/cmd/upctl-plus@latest
 
 ## Configuration
 
-`upctl-plus` uses the same configuration as the original UpCloud CLI. If you already have `upctl` configured, `upctl-plus` will work immediately.
-
-If not, set your credentials:
+Credentials are resolved **environment-first, then a config file**:
 
 ```bash
-export UPCLOUD_USERNAME="your-username"
-export UPCLOUD_PASSWORD="your-password"
+# Preferred: an UpCloud API token (People → API tokens in the Control Panel)
+export UPCLOUD_TOKEN="ucat_…"
+
+# Or sub-account username/password
+export UPCLOUD_USERNAME="…"
+export UPCLOUD_PASSWORD="…"
 ```
 
-For detailed configuration options, see the [original UpCloud CLI documentation](https://upcloudltd.github.io/upcloud-cli/).
+If no environment variables are set, `upctl-plus` reads the `upctl`-compatible config file at `~/.config/upctl.yaml` (honouring `XDG_CONFIG_HOME`):
 
-## Quick Start
+```yaml
+token: ucat_…
+# or:
+# username: …
+# password: …
+```
 
-### Interactive Mode
+If you already use `upctl`, your existing configuration works as-is.
+
+## Usage
+
+### Interactive dashboard
+
 ```bash
-# Launch interactive server selection
-upctl-plus server list --interactive
-
-# Or use the short form
-upctl-plus server list -i
+upctl-plus              # open the dashboard (lands on the server list)
+upctl-plus server list -i   # open the dashboard, deep-linked to servers
 ```
 
-### Regular Mode (Same as original upctl)
+Keys:
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | move the selection |
+| `enter` | load the selected server's details |
+| `s` / `x` / `r` | start / stop / restart (asks `y`/`n` to confirm) |
+| `q` | quit |
+
+A long error stays pinned (in red) at the bottom until you press a key.
+
+### CLI
+
 ```bash
-# List servers in table format
-upctl-plus server list
-
-# Show specific server details
-upctl-plus server show <server-uuid>
+upctl-plus server list                  # table of all servers
+upctl-plus server list -o json | jq     # scriptable JSON
+upctl-plus server show <hostname|uuid>  # details (resolves hostname or title)
+upctl-plus server restart web-sg-1      # act by hostname, UUID, or title
+upctl-plus server stop web-sg-1 db-sg-1 # act on several at once
 ```
+
+Servers can be referenced by **UUID, hostname, or title**.
 
 ## Exit codes
 
-Exit code communicates success or the type and number of failures. Possible exit codes of `upctl` are:
-
-Exit code | Description
---------- | -----------
-0         | Command(s) executed successfully.
-1 - 99    | Number of failed executions. For example, if stopping four servers and API returns error for one of the request, exit code will be 1.
-100 -     | Other, non-execution related, errors. For example, required flag missing.
-
-## Examples
-
-Every command has a `--help` parameter that can be used to print detailed usage instructions and examples on how to use the command. For example, run `upctl network list --help`, to display usage instructions and examples for `upctl network list` command.
-
-See [examples](./examples/) directory for examples on more complex use-cases.
-
-## Documentation
-
-The detailed documentation is available in [GitHub pages](https://upcloudltd.github.io/upcloud-cli/).
-
-To generate markdown version of command reference, run `make md-docs`. Command reference will then be generated into `docs/commands_reference`.
-
-```sh
-make md-docs
-```
-
-To run the MkDocs documentation locally, run make docs and start static http server (e.g., `python3 -m http.server 8000`) in `site/` directory or run mkdocs serve in repository root.
-
-```sh
-make docs
-mkdocs serve
-```
-
-## Contributing
-
-Contributions from the community are much appreciated! Please note that all features using our
-API should be implemented with [UpCloud Go API SDK](https://github.com/UpCloudLtd/upcloud-go-api).
-If something is missing from there, add an issue or PR in that repository instead before implementing it here.
-
-* Check GitHub issues and pull requests before creating new ones
-  * If the issue isn't yet reported, you can [create a new issue](https://github.com/UpCloudLtd/upcloud-cli/issues/new).
-* Besides bug reports, all improvement ideas and feature requests are more than welcome and can be submitted through GitHub issues.
-  * New features and enhancements can be submitted by first forking the repository and then sending your changes back as a pull request.
-* Following [semantic versioning](https://semver.org/), we won't accept breaking changes within the major version (1.x.x, 2.x.x etc).
-  * Such PRs can be open for some time and are only accepted when the next major version is being created.
+| Code | Meaning |
+| --- | --- |
+| `0` | Success |
+| `1`–`99` | Number of failed operations (e.g. 1 of 3 restarts failed) |
+| `100`+ | Other errors (missing flag, authentication failure, etc.) |
 
 ## Development
 
-* `upctl` uses [UpCloud Go API SDK](https://github.com/UpCloudLtd/upcloud-go-api)
-* `upctl` is built on [Cobra](https://cobra.dev)
-
-You need a Go version 1.20+ installed on your development machine.
-
-Use `make` to build and test the CLI. Makefile help can be found by running `make help`.
-
-```sh
-make help
-```
-
-### Debugging
-Environment variables `UPCLOUD_DEBUG_API_BASE_URL` and `UPCLOUD_DEBUG_SKIP_CERTIFICATE_VERIFY` can be used for HTTP client debugging purposes. More information can be found in the client's [README](https://github.com/UpCloudLtd/upcloud-go-api/blob/986ca6da9ca85ff51ecacc588215641e2e384cfa/README.md#debugging) file.
-
-### Requirements
-
-This repository uses [pre-commit](https://pre-commit.com/#install) and [go-critic](https://github.com/go-critic/go-critic)
-for maintaining code quality. Installing them is not mandatory, but it helps in avoiding the problems you'd
-otherwise encounter after opening a pull request as they are run by automated tests for all PRs.
-
-### Development quickstart
-
-To begin development, first fork the repository to your own account, clone it and begin making changes.
 ```bash
-git clone git@github.com/username/upcloud-cli.git
-cd upcloud-cli
-pre-commit install
+go test ./...     # run the test suite
+go vet ./...      # static checks
+go build ./...    # build everything
 ```
 
-Make the changes with your favorite editor. Once you're done, create a new branch and push it back to GitHub.
-```bash
-git checkout -b <branch-name>
-<add your changes, "git status" helps>
-git commit -m "New feature: create a new server in the nearest zone if not specified"
-git push --set-upstream <branch-name>
-```
+The codebase is layered so the CLI and the TUI are thin front-ends over one shared service layer (`internal/cloud`): `internal/cli` (Cobra commands), `internal/tui` (Bubble Tea dashboard), `internal/output` (rendering), `internal/config` (credentials).
 
-After pushing the new branch, browse to your fork of the repository in GitHub and create a pull request from there.
-Once the pull request is created, please make changes to your branch based on the comments & discussion in the PR.
+Dependencies are kept current automatically via [Renovate](./renovate.json) (minor/patch bumps auto-merge when CI is green).
 
 ## License
 
-[MIT license](LICENSE)
+[MIT](./LICENSE). Originally derived from [UpCloud CLI](https://github.com/UpCloudLtd/upcloud-cli); rebuilt on the official UpCloud Go SDK.

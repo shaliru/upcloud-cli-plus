@@ -46,8 +46,3 @@ dist/
 
 # Generated release notes
 .release_notes
-
-# Local development settings
-.claude/
-# Superpowers brainstorming companion
-.superpowers/
