@@ -57,7 +57,7 @@ func ServerDetailsText(w io.Writer, d *upcloud.ServerDetails) error {
 	fmt.Fprintf(tw, "Title\t%s\n", d.Title)
 	fmt.Fprintf(tw, "Plan\t%s\n", d.Plan)
 	fmt.Fprintf(tw, "Zone\t%s\n", d.Zone)
-	fmt.Fprintf(tw, "State\t%s\n", d.State)
+	fmt.Fprintf(tw, "State\t%s\n", stateColorFn(stateText(d.State)))
 	return tw.Flush()
 }
 
@@ -88,7 +88,7 @@ func StorageDetailsText(w io.Writer, d *upcloud.StorageDetails) error {
 	fmt.Fprintf(tw, "Zone\t%s\n", d.Zone)
 	fmt.Fprintf(tw, "Tier\t%s\n", d.Tier)
 	fmt.Fprintf(tw, "Type\t%s\n", d.Type)
-	fmt.Fprintf(tw, "State\t%s\n", d.State)
+	fmt.Fprintf(tw, "State\t%s\n", stateColorFn(stateText(d.State)))
 	return tw.Flush()
 }
 

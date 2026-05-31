@@ -62,3 +62,11 @@ func TestNetworksTable(t *testing.T) {
 	assert.Contains(t, out, "net-a")
 	assert.Contains(t, out, "1 network")
 }
+
+func TestServerDetailsText_StateDot(t *testing.T) {
+	var buf bytes.Buffer
+	require.NoError(t, ServerDetailsText(&buf, &upcloud.ServerDetails{
+		Server: upcloud.Server{UUID: "u1", Hostname: "web", State: "started"},
+	}))
+	assert.Contains(t, buf.String(), "● started")
+}
