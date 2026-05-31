@@ -19,6 +19,10 @@ type Service interface {
 	StartServer(ctx context.Context, uuid string) error
 	StopServer(ctx context.Context, uuid string) error
 	RestartServer(ctx context.Context, uuid string) error
+	ListStorage(ctx context.Context) ([]upcloud.Storage, error)
+	GetStorage(ctx context.Context, uuid string) (*upcloud.StorageDetails, error)
+	ListNetworks(ctx context.Context) ([]upcloud.Network, error)
+	GetNetwork(ctx context.Context, uuid string) (*upcloud.Network, error)
 }
 
 type sdkService struct {
@@ -69,4 +73,28 @@ func (s *sdkService) RestartServer(ctx context.Context, uuid string) error {
 		StopType: request.ServerStopTypeSoft,
 	})
 	return err
+}
+
+func (s *sdkService) ListStorage(ctx context.Context) ([]upcloud.Storage, error) {
+	res, err := s.svc.GetStorages(ctx, &request.GetStoragesRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return res.Storages, nil
+}
+
+func (s *sdkService) GetStorage(ctx context.Context, uuid string) (*upcloud.StorageDetails, error) {
+	return s.svc.GetStorageDetails(ctx, &request.GetStorageDetailsRequest{UUID: uuid})
+}
+
+func (s *sdkService) ListNetworks(ctx context.Context) ([]upcloud.Network, error) {
+	res, err := s.svc.GetNetworks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return res.Networks, nil
+}
+
+func (s *sdkService) GetNetwork(ctx context.Context, uuid string) (*upcloud.Network, error) {
+	return s.svc.GetNetworkDetails(ctx, &request.GetNetworkDetailsRequest{UUID: uuid})
 }
